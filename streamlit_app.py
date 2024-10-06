@@ -5,7 +5,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
-from sqlalchemy import create_engine
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
 from database import get_db_engine
 import traceback
 
@@ -13,7 +14,7 @@ import traceback
 def get_db_connection():
     return get_db_engine()
 
-# Sidebar model selection
+# Sidebar for model selection
 st.sidebar.header("Model Selection and Vessel Details")
 model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
 selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
@@ -63,17 +64,17 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
 # Function to get speed, consumption, power data for selected vessels
 def get_vessel_performance_data(engine, vessel_names):
     query_ballast = """
-    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
     WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Ballast'
     """
     query_scantling = """
-    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
     WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Scantling'
     """
     query_design = """
-    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
     WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Design'
     """
@@ -111,7 +112,31 @@ def get_vessel_performance_data(engine, vessel_names):
 
     return df_ballast, df_scantling
 
-# Button to start fetching data and training
+# Function to train the selected model
+def train_model(X, y, model_type):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    if model_type == "Linear Regression with Polynomial Features":
+        poly = PolynomialFeatures(degree=2)
+        X_poly = poly.fit_transform(X_train)
+        model = LinearRegression()
+        model.fit(X_poly, y_train)
+        y_pred = model.predict(poly.transform(X_test))
+    elif model_type == "Random Forest":
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+    elif model_type == "MLP Regressor":
+        model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+    
+    mse = mean_squared_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    
+    return model, mse, r2
+
+# Main execution
 if st.sidebar.button("Fetch Data and Train Model"):
     engine = get_db_connection()
     similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type)
@@ -122,7 +147,6 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
         st.write("Names of similar vessels:")
         st.write(similar_vessels['vessel_name'].tolist())
-        vessel_ids = similar_vessels['imo'].tolist()
         vessel_names = similar_vessels['vessel_name'].tolist()
         
         st.write("Attempting to fetch performance data...")
@@ -131,28 +155,41 @@ if st.sidebar.button("Fetch Data and Train Model"):
         if df_ballast.empty and df_scantling.empty:
             st.write("No performance data available for the selected vessels.")
         else:
-            st.write("Data fetched successfully. Ready for verification.")
-            
-            # Display the dataframes
-            if not df_ballast.empty:
-                st.write("Ballast Load Type Data:")
-                st.write(df_ballast)
-            else:
-                st.write("No Ballast data available.")
-            
-            if not df_scantling.empty:
-                st.write("Scantling/Design Load Type Data:")
-                st.write(df_scantling)
-            else:
-                st.write("No Scantling/Design data available.")
             st.write("Data fetched successfully. Ready for model training.")
+            
+            # Combine ballast and scantling data
+            df_combined = pd.concat([df_ballast, df_scantling], ignore_index=True)
+            
+            # Prepare data for model training
+            X = df_combined[['speed_kts', 'displacement']]
+            y = df_combined['me_power_kw']
+            
+            # Train the selected model
+            model, mse, r2 = train_model(X, y, selected_model)
+            
+            st.write(f"Model: {selected_model}")
+            st.write(f"Mean Squared Error: {mse}")
+            st.write(f"R-squared Score: {r2}")
+            
+            # Create output table
+            st.subheader("Output Table (Sample Predictions)")
+            output_speeds = np.linspace(X['speed_kts'].min(), X['speed_kts'].max(), 10)
+            output_displacements = np.linspace(X['displacement'].min(), X['displacement'].max(), 10)
+            output_data = []
+            
+            for speed in output_speeds:
+                for disp in output_displacements:
+                    if selected_model == "Linear Regression with Polynomial Features":
+                        power = model.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                    else:
+                        power = model.predict([[speed, disp]])[0]
+                    output_data.append({
+                        'Speed (kts)': speed,
+                        'Displacement': disp,
+                        'Predicted Power (kW)': power,
+                    })
+            
+            output_df = pd.DataFrame(output_data)
+            st.dataframe(output_df)
 
-    # Placeholder for model training code
-    st.write("Model training functionality is currently hashed out.")
-
-    # Placeholder for output table
-    st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
-    # Add code to create and display output table here
-
-# Placeholder for future steps and more details
-st.sidebar.write("Once the model is trained, we will generate output tables and further analyze results.")
+st.sidebar.write("Once the model is trained, you can analyze the results and make predictions.")
