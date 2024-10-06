@@ -6,9 +6,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
 from database import get_db_engine
-import traceback
 
 # Database setup
 def get_db_connection():
@@ -33,7 +31,8 @@ mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_valu
 # Function to get similar vessels from database
 def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
     query = """
-    SELECT * FROM hull_particulars
+    SELECT vessel_name, length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, depth, deadweight, vessel_type
+    FROM hull_particulars
     WHERE
         length_between_perpendiculars_m BETWEEN %(lpp_min)s AND %(lpp_max)s AND
         breadth_moduled_m BETWEEN %(breadth_min)s AND %(breadth_max)s AND
@@ -101,8 +100,9 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("No vessels found matching the given criteria.")
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
-        st.write("Names of similar vessels:")
-        st.write(similar_vessels['vessel_name'].tolist())
+        st.write("Similar Vessels Details:")
+        st.dataframe(similar_vessels.set_index('vessel_name'))
+        
         vessel_names = similar_vessels['vessel_name'].tolist()
         
         df_performance = get_vessel_performance_data(engine, vessel_names)
@@ -119,28 +119,44 @@ if st.sidebar.button("Fetch Data and Train Model"):
             model_power = train_model(X, y_power, selected_model)
             model_consumption = train_model(X, y_consumption, selected_model)
             
-            # Create output table
-            st.subheader("Output Table (Sample Predictions)")
-            output_speeds = np.linspace(X['speed_kts'].min(), X['speed_kts'].max(), 10)
-            output_displacements = np.linspace(X['displacement'].min(), X['displacement'].max(), 10)
-            output_data = []
+            # Create output tables
+            st.subheader("Output Tables (Predictions)")
+            
+            # Set speed range based on vessel type
+            if vessel_type == "CONTAINER":
+                output_speeds = range(10, 23)  # 10 to 22 knots
+            else:
+                output_speeds = range(8, 16)  # 8 to 15 knots
+            
+            ballast_displacement = df_performance['displacement'].min()
+            laden_displacement = df_performance['displacement'].max()
+            
+            output_data_ballast = []
+            output_data_laden = []
             
             for speed in output_speeds:
-                for disp in output_displacements:
+                for disp, data_list in [(ballast_displacement, output_data_ballast), (laden_displacement, output_data_laden)]:
                     if selected_model == "Linear Regression with Polynomial Features":
                         power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                         consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                     else:
                         power = model_power.predict([[speed, disp]])[0]
                         consumption = model_consumption.predict([[speed, disp]])[0]
-                    output_data.append({
+                    data_list.append({
                         'Speed (kts)': speed,
-                        'Displacement': disp,
-                        'Predicted Power (kW)': power,
-                        'Predicted Consumption (mt)': consumption
+                        'Power (kW)': round(power, 2),
+                        'Consumption (mt/day)': round(consumption, 2)  # No conversion needed, already in mt/day
                     })
             
-            output_df = pd.DataFrame(output_data)
-            st.dataframe(output_df)
+            # Create two columns for side-by-side tables
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("Ballast Condition")
+                st.dataframe(pd.DataFrame(output_data_ballast).set_index('Speed (kts)'))
+            
+            with col2:
+                st.write("Laden Condition")
+                st.dataframe(pd.DataFrame(output_data_laden).set_index('Speed (kts)'))
 
-st.sidebar.write("Once the models are trained, you can analyze the predictions in the output table.")
+st.sidebar.write("Once the models are trained, you can analyze the predictions in the output tables.")
