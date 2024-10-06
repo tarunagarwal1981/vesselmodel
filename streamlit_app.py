@@ -37,7 +37,7 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, mcr, vessel_typ
         breadth_moduled_m BETWEEN {breadth * 0.95} AND {breadth * 1.05} AND
         depth BETWEEN {depth * 0.95} AND {depth * 1.05} AND
         deadweight BETWEEN {deadweight * 0.95} AND {deadweight * 1.05} AND
-        mcr BETWEEN {mcr * 0.95} AND {mcr * 1.05} AND
+        
         vessel_type = '{vessel_type}'
     """
     return pd.read_sql(query, engine)
