@@ -76,20 +76,20 @@ def get_vessel_performance_data(engine, vessel_names):
     query_ballast = """
     SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name = ANY(%(vessel_names)s) AND load_type = 'Ballast'
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Ballast'
     """
     query_scantling = """
     SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name = ANY(%(vessel_names)s) AND load_type = 'Scantling'
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Scantling'
     """
     query_design = """
     SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name = ANY(%(vessel_names)s) AND load_type = 'Design'
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Design'
     """
     params = {
-        'vessel_names': tuple([name.upper() for name in vessel_names])
+        'vessel_names': tuple([name.upper() for name in vessel_names]) if len(vessel_names) > 1 else tuple([name.upper() for name in vessel_names] + [None])
     }
     df_ballast = pd.read_sql(query_ballast, engine, params=params)
     df_scantling = pd.read_sql(query_scantling, engine, params=params)
