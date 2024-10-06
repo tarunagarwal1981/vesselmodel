@@ -23,7 +23,7 @@ breadth = st.sidebar.number_input("Breadth (m)", min_value=10.0, max_value=100.0
 depth = st.sidebar.number_input("Depth (m)", min_value=5.0, max_value=50.0, step=0.1)
 deadweight = st.sidebar.number_input("Deadweight (tons)", min_value=1000, max_value=500000, step=100)
 year_of_built = st.sidebar.number_input("Year of Built", min_value=1900, max_value=2025, step=1)
-vessel_type = st.sidebar.text_input("Vessel Type")
+vessel_type = st.sidebar.selectbox("Vessel Type", ["BULK CARRIER", "CONTAINER", "OIL TANKER"])
 main_engine_make = st.sidebar.text_input("Main Engine Make")
 main_engine_model = st.sidebar.text_input("Main Engine Model")
 mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_value=100000, step=100)
