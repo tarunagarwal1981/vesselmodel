@@ -119,7 +119,13 @@ if st.sidebar.button("Fetch Data and Train Model"):
             
             # Create output table
             st.subheader("Output Table (Predictions)")
-            output_speeds = range(8, 16)  # 8 to 15 knots
+            
+            # Set speed range based on vessel type
+            if vessel_type == "CONTAINER":
+                output_speeds = range(10, 23)  # 10 to 22 knots
+            else:
+                output_speeds = range(8, 16)  # 8 to 15 knots
+            
             ballast_displacement = df_performance['displacement'].min()
             laden_displacement = df_performance['displacement'].max()
             
