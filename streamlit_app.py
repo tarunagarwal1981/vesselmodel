@@ -105,7 +105,9 @@ if st.sidebar.button("Fetch Data and Train Model"):
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
         st.write("Similar Vessels Details:")
-        st.dataframe(similar_vessels.set_index('vessel_name'))
+        # Round numeric columns to 2 decimal places
+        similar_vessels_display = similar_vessels.round({'lpp': 2, 'breadth': 2, 'depth': 2, 'deadweight': 2, 'mcr': 2})
+        st.dataframe(similar_vessels_display.set_index('vessel_name'))
         
         vessel_names = similar_vessels['vessel_name'].tolist()
         
