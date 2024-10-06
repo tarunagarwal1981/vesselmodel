@@ -6,13 +6,11 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sqlalchemy import create_engine
-from database import db_credentials
+from database import get_db_engine
 
 # Database setup
 def get_db_connection():
-    creds = db_credentials()
-    engine = create_engine(f"postgresql://{creds['user']}:{creds['password']}@{creds['host']}:{creds['port']}/{creds['dbname']}")
-    return engine
+    return get_db_engine()
 
 # Sidebar model selection
 st.sidebar.header("Model Selection and Vessel Details")
