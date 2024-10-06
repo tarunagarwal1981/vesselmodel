@@ -6,9 +6,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
 from database import get_db_engine
-import traceback
 
 # Database setup
 def get_db_connection():
@@ -120,13 +118,15 @@ if st.sidebar.button("Fetch Data and Train Model"):
             model_consumption = train_model(X, y_consumption, selected_model)
             
             # Create output table
-            st.subheader("Output Table (Sample Predictions)")
-            output_speeds = np.linspace(X['speed_kts'].min(), X['speed_kts'].max(), 10)
-            output_displacements = np.linspace(X['displacement'].min(), X['displacement'].max(), 10)
+            st.subheader("Output Table (Predictions)")
+            output_speeds = range(8, 16)  # 8 to 15 knots
+            ballast_displacement = df_performance['displacement'].min()
+            laden_displacement = df_performance['displacement'].max()
+            
             output_data = []
             
             for speed in output_speeds:
-                for disp in output_displacements:
+                for disp in [ballast_displacement, laden_displacement]:
                     if selected_model == "Linear Regression with Polynomial Features":
                         power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                         consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
@@ -135,9 +135,9 @@ if st.sidebar.button("Fetch Data and Train Model"):
                         consumption = model_consumption.predict([[speed, disp]])[0]
                     output_data.append({
                         'Speed (kts)': speed,
-                        'Displacement': disp,
-                        'Predicted Power (kW)': power,
-                        'Predicted Consumption (mt)': consumption
+                        'Displacement': 'Ballast' if disp == ballast_displacement else 'Laden',
+                        'Predicted Power (kW)': round(power, 2),
+                        'Predicted Consumption (mt/day)': round(consumption * 24, 2)  # Assuming consumption is per hour, converting to per day
                     })
             
             output_df = pd.DataFrame(output_data)
