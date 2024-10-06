@@ -6,7 +6,9 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
 from database import get_db_engine
+import traceback
 
 # Database setup
 def get_db_connection():
@@ -31,8 +33,7 @@ mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_valu
 # Function to get similar vessels from database
 def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
     query = """
-    SELECT vessel_name, length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, depth, deadweight, vessel_type
-    FROM hull_particulars
+    SELECT * FROM hull_particulars
     WHERE
         length_between_perpendiculars_m BETWEEN %(lpp_min)s AND %(lpp_max)s AND
         breadth_moduled_m BETWEEN %(breadth_min)s AND %(breadth_max)s AND
@@ -100,9 +101,8 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("No vessels found matching the given criteria.")
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
-        st.write("Similar Vessels Details:")
-        st.dataframe(similar_vessels.set_index('vessel_name'))
-        
+        st.write("Names of similar vessels:")
+        st.write(similar_vessels['vessel_name'].tolist())
         vessel_names = similar_vessels['vessel_name'].tolist()
         
         df_performance = get_vessel_performance_data(engine, vessel_names)
@@ -120,21 +120,13 @@ if st.sidebar.button("Fetch Data and Train Model"):
             model_consumption = train_model(X, y_consumption, selected_model)
             
             # Create output table
-            st.subheader("Output Table (Predictions)")
-            
-            # Set speed range based on vessel type
-            if vessel_type == "CONTAINER":
-                output_speeds = range(10, 23)  # 10 to 22 knots
-            else:
-                output_speeds = range(8, 16)  # 8 to 15 knots
-            
-            ballast_displacement = df_performance['displacement'].min()
-            laden_displacement = df_performance['displacement'].max()
-            
+            st.subheader("Output Table (Sample Predictions)")
+            output_speeds = np.linspace(X['speed_kts'].min(), X['speed_kts'].max(), 10)
+            output_displacements = np.linspace(X['displacement'].min(), X['displacement'].max(), 10)
             output_data = []
             
             for speed in output_speeds:
-                for disp in [ballast_displacement, laden_displacement]:
+                for disp in output_displacements:
                     if selected_model == "Linear Regression with Polynomial Features":
                         power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                         consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
@@ -143,9 +135,9 @@ if st.sidebar.button("Fetch Data and Train Model"):
                         consumption = model_consumption.predict([[speed, disp]])[0]
                     output_data.append({
                         'Speed (kts)': speed,
-                        'Displacement': 'Ballast' if disp == ballast_displacement else 'Laden',
-                        'Predicted Power (kW)': round(power, 2),
-                        'Predicted Consumption (mt/day)': round(consumption * 24, 2)  # Assuming consumption is per hour, converting to per day
+                        'Displacement': disp,
+                        'Predicted Power (kW)': power,
+                        'Predicted Consumption (mt)': consumption
                     })
             
             output_df = pd.DataFrame(output_data)
