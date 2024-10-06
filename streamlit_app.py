@@ -129,8 +129,7 @@ if st.sidebar.button("Fetch Data and Train Model"):
             st.write(df_scantling)
         else:
             st.write("No Scantling/Design data available.")
-        else:
-            st.write("Data fetched successfully. Ready for model training.")
+        st.write("Data fetched successfully. Ready for model training.")
             
             # Placeholder for model training code
             st.write("Model training functionality is currently hashed out.")
