@@ -119,8 +119,8 @@ if st.sidebar.button("Fetch Data and Train Model"):
             model_power = train_model(X, y_power, selected_model)
             model_consumption = train_model(X, y_consumption, selected_model)
             
-            # Create output tables
-            st.subheader("Output Tables (Predictions)")
+            # Create output table
+            st.subheader("Output Table (Predictions)")
             
             # Set speed range based on vessel type
             if vessel_type == "CONTAINER":
@@ -131,32 +131,24 @@ if st.sidebar.button("Fetch Data and Train Model"):
             ballast_displacement = df_performance['displacement'].min()
             laden_displacement = df_performance['displacement'].max()
             
-            output_data_ballast = []
-            output_data_laden = []
+            output_data = []
             
             for speed in output_speeds:
-                for disp, data_list in [(ballast_displacement, output_data_ballast), (laden_displacement, output_data_laden)]:
+                for disp in [ballast_displacement, laden_displacement]:
                     if selected_model == "Linear Regression with Polynomial Features":
                         power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                         consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                     else:
                         power = model_power.predict([[speed, disp]])[0]
                         consumption = model_consumption.predict([[speed, disp]])[0]
-                    data_list.append({
+                    output_data.append({
                         'Speed (kts)': speed,
-                        'Power (kW)': round(power, 2),
-                        'Consumption (mt/day)': round(consumption * 24, 2)  # Assuming consumption is per hour, converting to per day
+                        'Displacement': 'Ballast' if disp == ballast_displacement else 'Laden',
+                        'Predicted Power (kW)': round(power, 2),
+                        'Predicted Consumption (mt/day)': round(consumption * 24, 2)  # Assuming consumption is per hour, converting to per day
                     })
             
-            # Create two columns for side-by-side tables
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("Ballast Condition")
-                st.dataframe(pd.DataFrame(output_data_ballast).set_index('Speed (kts)'))
-            
-            with col2:
-                st.write("Laden Condition")
-                st.dataframe(pd.DataFrame(output_data_laden).set_index('Speed (kts)'))
+            output_df = pd.DataFrame(output_data)
+            st.dataframe(output_df)
 
-st.sidebar.write("Once the models are trained, you can analyze the predictions in the output tables.")
+st.sidebar.write("Once the models are trained, you can analyze the predictions in the output table.")
