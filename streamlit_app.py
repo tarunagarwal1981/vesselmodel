@@ -130,12 +130,12 @@ if st.sidebar.button("Fetch Data and Train Model"):
         else:
             st.write("No Scantling/Design data available.")
         st.write("Data fetched successfully. Ready for model training.")
-            
-            # Placeholder for model training code
+
+    # Placeholder for model training code
     st.write("Model training functionality is currently hashed out.")
 
-            # Placeholder for output table
-            st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
+    # Placeholder for output table
+    st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
             # Add code to create and display output table here
 
 # Placeholder for future steps and more details
