@@ -72,12 +72,30 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
     return pd.read_sql(query, engine)
 
 # Function to get speed, consumption, power data for selected vessels
-def get_speed_consumption_data(engine, vessel_ids):
-    query = f"""
-    SELECT * FROM speed_consumption_data
-    WHERE vessel_id IN ({', '.join(map(str, vessel_ids))})
+def get_vessel_performance_data(engine, vessel_names):
+    query_ballast = """
+    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    FROM vessel_performance_model_data
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Ballast'
     """
-    return pd.read_sql(query, engine)
+    query_scantling = """
+    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    FROM vessel_performance_model_data
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Scantling'
+    """
+    query_design = """
+    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    FROM vessel_performance_model_data
+    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Design'
+    """
+    params = {
+        'vessel_names': tuple(vessel_names)
+    }
+    df_ballast = pd.read_sql(query_ballast, engine, params=params)
+    df_scantling = pd.read_sql(query_scantling, engine, params=params)
+    if df_scantling.empty:
+        df_scantling = pd.read_sql(query_design, engine, params=params)
+    return df_ballast, df_scantling
 
 # Button to start fetching data and training
 if st.sidebar.button("Fetch Data and Train Model"):
@@ -91,10 +109,26 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("Names of similar vessels:")
         st.write(similar_vessels['vessel_name'].tolist())
         vessel_ids = similar_vessels['imo'].tolist()
-        speed_consumption_data = get_speed_consumption_data(engine, vessel_ids)
+        vessel_names = similar_vessels['vessel_name'].tolist()
+    df_ballast, df_scantling = get_vessel_performance_data(engine, vessel_names)
+    
+    if df_ballast.empty and df_scantling.empty:
+        st.write("No performance data available for the selected vessels.")
+    else:
+        st.write("Data fetched successfully. Ready for verification.")
         
-        if speed_consumption_data.empty:
-            st.write("No speed, consumption, or power data available for the selected vessels.")
+        # Display the dataframes
+        if not df_ballast.empty:
+            st.write("Ballast Load Type Data:")
+            st.write(df_ballast)
+        else:
+            st.write("No Ballast data available.")
+        
+        if not df_scantling.empty:
+            st.write("Scantling/Design Load Type Data:")
+            st.write(df_scantling)
+        else:
+            st.write("No Scantling/Design data available.")
         else:
             st.write("Data fetched successfully. Ready for model training.")
             
