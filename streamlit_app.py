@@ -162,14 +162,20 @@ if st.sidebar.button("Fetch Data and Train Model"):
             
             # Prepare data for model training
             X = df_combined[['speed_kts', 'displacement']]
-            y = df_combined['me_power_kw']
+            y_power = df_combined['me_power_kw']
+            y_consumption = df_combined['me_consumption_mt']
             
-            # Train the selected model
-            model, mse, r2 = train_model(X, y, selected_model)
+            # Train models for power and consumption
+            model_power, mse_power, r2_power = train_model(X, y_power, selected_model)
+            model_consumption, mse_consumption, r2_consumption = train_model(X, y_consumption, selected_model)
             
             st.write(f"Model: {selected_model}")
-            st.write(f"Mean Squared Error: {mse}")
-            st.write(f"R-squared Score: {r2}")
+            st.write("Power Prediction Model:")
+            st.write(f"Mean Squared Error: {mse_power}")
+            st.write(f"R-squared Score: {r2_power}")
+            st.write("Consumption Prediction Model:")
+            st.write(f"Mean Squared Error: {mse_consumption}")
+            st.write(f"R-squared Score: {r2_consumption}")
             
             # Create output table
             st.subheader("Output Table (Sample Predictions)")
@@ -180,16 +186,19 @@ if st.sidebar.button("Fetch Data and Train Model"):
             for speed in output_speeds:
                 for disp in output_displacements:
                     if selected_model == "Linear Regression with Polynomial Features":
-                        power = model.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                        power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                        consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
                     else:
-                        power = model.predict([[speed, disp]])[0]
+                        power = model_power.predict([[speed, disp]])[0]
+                        consumption = model_consumption.predict([[speed, disp]])[0]
                     output_data.append({
                         'Speed (kts)': speed,
                         'Displacement': disp,
                         'Predicted Power (kW)': power,
+                        'Predicted Consumption (mt)': consumption
                     })
             
             output_df = pd.DataFrame(output_data)
             st.dataframe(output_df)
 
-st.sidebar.write("Once the model is trained, you can analyze the results and make predictions.")
+st.sidebar.write("Once the models are trained, you can analyze the results and make predictions for both power and consumption.")
