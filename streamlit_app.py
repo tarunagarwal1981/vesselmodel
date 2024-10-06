@@ -132,7 +132,7 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("Data fetched successfully. Ready for model training.")
             
             # Placeholder for model training code
-            st.write("Model training functionality is currently hashed out.")
+    st.write("Model training functionality is currently hashed out.")
 
             # Placeholder for output table
             st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
