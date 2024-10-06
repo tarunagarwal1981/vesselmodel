@@ -53,64 +53,26 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
         'vessel_type': vessel_type
     }
     try:
-        st.write(f"Executing query: {query}")
-        st.write(f"With parameters: {params}")
         return pd.read_sql(query, engine, params=params)
     except Exception as e:
         st.error(f"Error executing query: {e}")
-        st.write(f"Full traceback: {traceback.format_exc()}")
         return pd.DataFrame()
 
 # Function to get speed, consumption, power data for selected vessels
 def get_vessel_performance_data(engine, vessel_names):
-    query_ballast = """
+    query = """
     SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Ballast'
-    """
-    query_scantling = """
-    SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
-    FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Scantling'
-    """
-    query_design = """
-    SELECT VESSEL_NAME, speed_kts, me_power_kw, me_consumption_mt, displacement
-    FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names_list)s AND load_type = 'Design'
+    WHERE vessel_name IN %(vessel_names_list)s
     """
     params = {
         'vessel_names_list': tuple([name.upper() for name in vessel_names])
     }
-    
     try:
-        st.write(f"Executing query for Ballast data with parameters: {params}")
-        df_ballast = pd.read_sql(query_ballast, engine, params=params)
-        st.write(f"Ballast data query successful. Retrieved {len(df_ballast)} rows.")
+        return pd.read_sql(query, engine, params=params)
     except Exception as e:
-        st.error(f"Error executing Ballast data query: {str(e)}")
-        st.write(f"Full traceback: {traceback.format_exc()}")
-        df_ballast = pd.DataFrame()
-
-    try:
-        st.write(f"Executing query for Scantling data with parameters: {params}")
-        df_scantling = pd.read_sql(query_scantling, engine, params=params)
-        st.write(f"Scantling data query successful. Retrieved {len(df_scantling)} rows.")
-    except Exception as e:
-        st.error(f"Error executing Scantling data query: {str(e)}")
-        st.write(f"Full traceback: {traceback.format_exc()}")
-        df_scantling = pd.DataFrame()
-
-    if df_scantling.empty:
-        try:
-            st.write(f"Executing query for Design data with parameters: {params}")
-            df_scantling = pd.read_sql(query_design, engine, params=params)
-            st.write(f"Design data query successful. Retrieved {len(df_scantling)} rows.")
-        except Exception as e:
-            st.error(f"Error executing Design data query: {str(e)}")
-            st.write(f"Full traceback: {traceback.format_exc()}")
-            df_scantling = pd.DataFrame()
-
-    return df_ballast, df_scantling
+        st.error(f"Error executing performance data query: {e}")
+        return pd.DataFrame()
 
 # Function to train the selected model
 def train_model(X, y, model_type):
@@ -121,20 +83,14 @@ def train_model(X, y, model_type):
         X_poly = poly.fit_transform(X_train)
         model = LinearRegression()
         model.fit(X_poly, y_train)
-        y_pred = model.predict(poly.transform(X_test))
     elif model_type == "Random Forest":
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
     elif model_type == "MLP Regressor":
         model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
         model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
     
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    
-    return model, mse, r2
+    return model
 
 # Main execution
 if st.sidebar.button("Fetch Data and Train Model"):
@@ -149,33 +105,19 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write(similar_vessels['vessel_name'].tolist())
         vessel_names = similar_vessels['vessel_name'].tolist()
         
-        st.write("Attempting to fetch performance data...")
-        df_ballast, df_scantling = get_vessel_performance_data(engine, vessel_names)
+        df_performance = get_vessel_performance_data(engine, vessel_names)
         
-        if df_ballast.empty and df_scantling.empty:
+        if df_performance.empty:
             st.write("No performance data available for the selected vessels.")
         else:
-            st.write("Data fetched successfully. Ready for model training.")
-            
-            # Combine ballast and scantling data
-            df_combined = pd.concat([df_ballast, df_scantling], ignore_index=True)
-            
             # Prepare data for model training
-            X = df_combined[['speed_kts', 'displacement']]
-            y_power = df_combined['me_power_kw']
-            y_consumption = df_combined['me_consumption_mt']
+            X = df_performance[['speed_kts', 'displacement']]
+            y_power = df_performance['me_power_kw']
+            y_consumption = df_performance['me_consumption_mt']
             
             # Train models for power and consumption
-            model_power, mse_power, r2_power = train_model(X, y_power, selected_model)
-            model_consumption, mse_consumption, r2_consumption = train_model(X, y_consumption, selected_model)
-            
-            st.write(f"Model: {selected_model}")
-            st.write("Power Prediction Model:")
-            st.write(f"Mean Squared Error: {mse_power}")
-            st.write(f"R-squared Score: {r2_power}")
-            st.write("Consumption Prediction Model:")
-            st.write(f"Mean Squared Error: {mse_consumption}")
-            st.write(f"R-squared Score: {r2_consumption}")
+            model_power = train_model(X, y_power, selected_model)
+            model_consumption = train_model(X, y_consumption, selected_model)
             
             # Create output table
             st.subheader("Output Table (Sample Predictions)")
@@ -201,4 +143,4 @@ if st.sidebar.button("Fetch Data and Train Model"):
             output_df = pd.DataFrame(output_data)
             st.dataframe(output_df)
 
-st.sidebar.write("Once the models are trained, you can analyze the results and make predictions for both power and consumption.")
+st.sidebar.write("Once the models are trained, you can analyze the predictions in the output table.")
