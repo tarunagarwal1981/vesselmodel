@@ -74,19 +74,19 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
 # Function to get speed, consumption, power data for selected vessels
 def get_vessel_performance_data(engine, vessel_names):
     query_ballast = """
-    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Ballast'
+    WHERE UPPER(vessel_name) = ANY(UPPER(%(vessel_names)s)) AND load_type = 'Ballast'
     """
     query_scantling = """
-    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Scantling'
+    WHERE UPPER(vessel_name) = ANY(UPPER(%(vessel_names)s)) AND load_type = 'Scantling'
     """
     query_design = """
-    SELECT vessel_name, speed_knts, me_power_kw, me_consumption_mt, displacement
+    SELECT VESSEL_NAME, speed_knts, me_power_kw, me_consumption_mt, displacement
     FROM vessel_performance_model_data
-    WHERE vessel_name IN %(vessel_names)s AND load_type = 'Design'
+    WHERE UPPER(vessel_name) = ANY(UPPER(%(vessel_names)s)) AND load_type = 'Design'
     """
     params = {
         'vessel_names': tuple(vessel_names)
