@@ -37,8 +37,7 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, mcr, vessel_typ
         breadth_moduled_m BETWEEN {breadth * 0.95} AND {breadth * 1.05} AND
         depth BETWEEN {depth * 0.95} AND {depth * 1.05} AND
         deadweight BETWEEN {deadweight * 0.95} AND {deadweight * 1.05} AND
-        
-        vessel_type = '{vessel_type}'
+                vessel_type = '{vessel_type}'
     """
     return pd.read_sql(query, engine)
 
@@ -70,15 +69,7 @@ if st.sidebar.button("Fetch Data and Train Model"):
             st.write("Data fetched successfully. Ready for model training.")
             
             # Placeholder for model training code
-            if selected_model == "Linear Regression with Polynomial Features":
-                st.write("Training Linear Regression with Polynomial Features...")
-                # Add model training code here
-            elif selected_model == "Random Forest":
-                st.write("Training Random Forest Regressor...")
-                # Add model training code here
-            elif selected_model == "MLP Regressor":
-                st.write("Training MLP Regressor...")
-                # Add model training code here
+            st.write("Model training functionality is currently hashed out.")
 
             # Placeholder for output table
             st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
