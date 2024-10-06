@@ -31,7 +31,8 @@ mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_valu
 # Function to get similar vessels from database
 def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
     query = """
-    SELECT * FROM hull_particulars
+    SELECT vessel_name, length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, depth, deadweight, vessel_type
+    FROM hull_particulars
     WHERE
         length_between_perpendiculars_m BETWEEN %(lpp_min)s AND %(lpp_max)s AND
         breadth_moduled_m BETWEEN %(breadth_min)s AND %(breadth_max)s AND
@@ -99,8 +100,9 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("No vessels found matching the given criteria.")
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
-        st.write("Names of similar vessels:")
-        st.write(similar_vessels['vessel_name'].tolist())
+        st.write("Similar Vessels Details:")
+        st.dataframe(similar_vessels.set_index('vessel_name'))
+        
         vessel_names = similar_vessels['vessel_name'].tolist()
         
         df_performance = get_vessel_performance_data(engine, vessel_names)
