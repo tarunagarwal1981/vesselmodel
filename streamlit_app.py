@@ -59,6 +59,8 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("No vessels found matching the given criteria.")
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
+        st.write("Names of similar vessels:")
+        st.write(similar_vessels['vessel_name'].tolist())
         vessel_ids = similar_vessels['imo'].tolist()
         speed_consumption_data = get_speed_consumption_data(engine, vessel_ids)
         
