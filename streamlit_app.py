@@ -7,10 +7,20 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
 from database import get_db_engine
+import traceback
+import time
 
 # Database setup
 def get_db_connection():
-    return get_db_engine()
+    st.write("Attempting to connect to the database...")
+    try:
+        engine = get_db_engine()
+        st.write("Database connection successful.")
+        return engine
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")
+        st.write(f"Full traceback: {traceback.format_exc()}")
+        return None
 
 # Sidebar for model selection
 st.sidebar.header("Model Selection and Vessel Details")
@@ -55,10 +65,16 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mc
         'mcr_min': mcr * 0.95,
         'mcr_max': mcr * 1.05
     }
+    st.write(f"Executing query with parameters: {params}")
     try:
-        return pd.read_sql(query, engine, params=params)
+        start_time = time.time()
+        df = pd.read_sql(query, engine, params=params)
+        end_time = time.time()
+        st.write(f"Query executed successfully in {end_time - start_time:.2f} seconds. Retrieved {len(df)} rows.")
+        return df
     except Exception as e:
         st.error(f"Error executing query: {e}")
+        st.write(f"Full traceback: {traceback.format_exc()}")
         return pd.DataFrame()
 
 # Function to get speed, consumption, power data for selected vessels
@@ -71,98 +87,120 @@ def get_vessel_performance_data(engine, vessel_names):
     params = {
         'vessel_names_list': tuple([name.upper() for name in vessel_names])
     }
+    st.write(f"Executing performance data query with parameters: {params}")
     try:
-        return pd.read_sql(query, engine, params=params)
+        start_time = time.time()
+        df = pd.read_sql(query, engine, params=params)
+        end_time = time.time()
+        st.write(f"Performance data query executed successfully in {end_time - start_time:.2f} seconds. Retrieved {len(df)} rows.")
+        return df
     except Exception as e:
         st.error(f"Error executing performance data query: {e}")
+        st.write(f"Full traceback: {traceback.format_exc()}")
         return pd.DataFrame()
 
 # Function to train the selected model
 def train_model(X, y, model_type):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    if model_type == "Linear Regression with Polynomial Features":
-        poly = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X_train)
-        model = LinearRegression()
-        model.fit(X_poly, y_train)
-    elif model_type == "Random Forest":
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
-    elif model_type == "MLP Regressor":
-        model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
-        model.fit(X_train, y_train)
-    
-    return model
+    st.write(f"Training {model_type} model...")
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        if model_type == "Linear Regression with Polynomial Features":
+            poly = PolynomialFeatures(degree=2)
+            X_poly = poly.fit_transform(X_train)
+            model = LinearRegression()
+            model.fit(X_poly, y_train)
+        elif model_type == "Random Forest":
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X_train, y_train)
+        elif model_type == "MLP Regressor":
+            model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
+            model.fit(X_train, y_train)
+        
+        st.write(f"{model_type} model trained successfully.")
+        return model
+    except Exception as e:
+        st.error(f"Error training model: {e}")
+        st.write(f"Full traceback: {traceback.format_exc()}")
+        return None
 
 # Main execution
 if st.sidebar.button("Fetch Data and Train Model"):
+    st.write("Starting data fetch and model training process...")
     engine = get_db_connection()
-    similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mcr)
-    
-    if similar_vessels.empty:
-        st.write("No vessels found matching the given criteria.")
-    else:
-        st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
-        st.write("Similar Vessels Details:")
-        # Round numeric columns to 2 decimal places
-        similar_vessels_display = similar_vessels.round({'lpp': 2, 'breadth': 2, 'depth': 2, 'deadweight': 2, 'mcr': 2})
-        st.dataframe(similar_vessels_display.set_index('vessel_name'))
+    if engine is not None:
+        similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mcr)
         
-        vessel_names = similar_vessels['vessel_name'].tolist()
-        
-        df_performance = get_vessel_performance_data(engine, vessel_names)
-        
-        if df_performance.empty:
-            st.write("No performance data available for the selected vessels.")
+        if similar_vessels.empty:
+            st.write("No vessels found matching the given criteria.")
         else:
-            # Prepare data for model training
-            X = df_performance[['speed_kts', 'displacement']]
-            y_power = df_performance['me_power_kw']
-            y_consumption = df_performance['me_consumption_mt']
+            st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
+            st.write("Similar Vessels Details:")
+            similar_vessels_display = similar_vessels.round({'lpp': 2, 'breadth': 2, 'depth': 2, 'deadweight': 2, 'mcr': 2})
+            st.dataframe(similar_vessels_display.set_index('vessel_name'))
             
-            # Train models for power and consumption
-            model_power = train_model(X, y_power, selected_model)
-            model_consumption = train_model(X, y_consumption, selected_model)
+            vessel_names = similar_vessels['vessel_name'].tolist()
             
-            # Create output tables
-            st.subheader("Output Tables (Predictions)")
+            df_performance = get_vessel_performance_data(engine, vessel_names)
             
-            # Set speed range based on vessel type
-            if vessel_type == "CONTAINER":
-                output_speeds = range(10, 23)  # 10 to 22 knots
+            if df_performance.empty:
+                st.write("No performance data available for the selected vessels.")
             else:
-                output_speeds = range(8, 16)  # 8 to 15 knots
-            
-            ballast_displacement = df_performance['displacement'].min()
-            laden_displacement = df_performance['displacement'].max()
-            
-            output_data_ballast = []
-            output_data_laden = []
-            
-            for speed in output_speeds:
-                for disp, data_list in [(ballast_displacement, output_data_ballast), (laden_displacement, output_data_laden)]:
-                    if selected_model == "Linear Regression with Polynomial Features":
-                        power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
-                        consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                st.write("Preparing data for model training...")
+                X = df_performance[['speed_kts', 'displacement']]
+                y_power = df_performance['me_power_kw']
+                y_consumption = df_performance['me_consumption_mt']
+                
+                model_power = train_model(X, y_power, selected_model)
+                model_consumption = train_model(X, y_consumption, selected_model)
+                
+                if model_power is not None and model_consumption is not None:
+                    st.write("Models trained successfully. Generating predictions...")
+                    
+                    # Create output tables
+                    st.subheader("Output Tables (Predictions)")
+                    
+                    # Set speed range based on vessel type
+                    if vessel_type == "CONTAINER":
+                        output_speeds = range(10, 23)  # 10 to 22 knots
                     else:
-                        power = model_power.predict([[speed, disp]])[0]
-                        consumption = model_consumption.predict([[speed, disp]])[0]
-                    data_list.append({
-                        'Speed (kts)': speed,
-                        'Power (kW)': round(power, 2),
-                        'Consumption (mt/day)': round(consumption, 2)
-                    })
-            
-            # Create two columns for side-by-side tables
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("Ballast Condition")
-                st.dataframe(pd.DataFrame(output_data_ballast).set_index('Speed (kts)'))
-            
-            with col2:
-                st.write("Laden Condition")
-                st.dataframe(pd.DataFrame(output_data_laden).set_index('Speed (kts)'))
+                        output_speeds = range(8, 16)  # 8 to 15 knots
+                    
+                    ballast_displacement = df_performance['displacement'].min()
+                    laden_displacement = df_performance['displacement'].max()
+                    
+                    output_data_ballast = []
+                    output_data_laden = []
+                    
+                    for speed in output_speeds:
+                        for disp, data_list in [(ballast_displacement, output_data_ballast), (laden_displacement, output_data_laden)]:
+                            if selected_model == "Linear Regression with Polynomial Features":
+                                power = model_power.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                                consumption = model_consumption.predict(PolynomialFeatures(degree=2).fit_transform([[speed, disp]]))[0]
+                            else:
+                                power = model_power.predict([[speed, disp]])[0]
+                                consumption = model_consumption.predict([[speed, disp]])[0]
+                            data_list.append({
+                                'Speed (kts)': speed,
+                                'Power (kW)': round(power, 2),
+                                'Consumption (mt/day)': round(consumption, 2)
+                            })
+                    
+                    # Create two columns for side-by-side tables
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("Ballast Condition")
+                        st.dataframe(pd.DataFrame(output_data_ballast).set_index('Speed (kts)'))
+                    
+                    with col2:
+                        st.write("Laden Condition")
+                        st.dataframe(pd.DataFrame(output_data_laden).set_index('Speed (kts)'))
+                    
+                    st.write("Process completed successfully.")
+                else:
+                    st.error("Failed to train models. Please check the error messages above.")
+    else:
+        st.error("Failed to connect to the database. Please check your database connection settings.")
 
 st.sidebar.write("Once the models are trained, you can analyze the predictions in the output tables.")
