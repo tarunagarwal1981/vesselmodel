@@ -1,151 +1,88 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
+from sqlalchemy import create_engine
+from database import db_credentials
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Database setup
+def get_db_connection():
+    creds = db_credentials()
+    engine = create_engine(f"postgresql://{creds['user']}:{creds['password']}@{creds['host']}:{creds['port']}/{creds['dbname']}")
+    return engine
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Sidebar model selection
+st.sidebar.header("Model Selection and Vessel Details")
+model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
+selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# User Inputs for Vessel Particulars
+lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
+breadth = st.sidebar.number_input("Breadth (m)", min_value=10.0, max_value=100.0, step=0.1)
+depth = st.sidebar.number_input("Depth (m)", min_value=5.0, max_value=50.0, step=0.1)
+deadweight = st.sidebar.number_input("Deadweight (tons)", min_value=1000, max_value=500000, step=100)
+year_of_built = st.sidebar.number_input("Year of Built", min_value=1900, max_value=2025, step=1)
+vessel_type = st.sidebar.text_input("Vessel Type")
+main_engine_make = st.sidebar.text_input("Main Engine Make")
+main_engine_model = st.sidebar.text_input("Main Engine Model")
+mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_value=100000, step=100)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+# Function to get similar vessels from database
+def get_similar_vessels(engine, lpp, breadth, depth, deadweight, mcr, vessel_type):
+    query = f"""
+    SELECT * FROM hull_particulars
+    WHERE
+        length_between_perpendiculars_m BETWEEN {lpp * 0.95} AND {lpp * 1.05} AND
+        breadth_moduled_m BETWEEN {breadth * 0.95} AND {breadth * 1.05} AND
+        depth BETWEEN {depth * 0.95} AND {depth * 1.05} AND
+        deadweight BETWEEN {deadweight * 0.95} AND {deadweight * 1.05} AND
+        mcr BETWEEN {mcr * 0.95} AND {mcr * 1.05} AND
+        vessel_type = '{vessel_type}'
     """
+    return pd.read_sql(query, engine)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Function to get speed, consumption, power data for selected vessels
+def get_speed_consumption_data(engine, vessel_ids):
+    query = f"""
+    SELECT * FROM speed_consumption_data
+    WHERE vessel_id IN ({', '.join(map(str, vessel_ids))})
+    """
+    return pd.read_sql(query, engine)
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+# Button to start fetching data and training
+if st.sidebar.button("Fetch Data and Train Model"):
+    engine = get_db_connection()
+    similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, mcr, vessel_type)
+    
+    if similar_vessels.empty:
+        st.write("No vessels found matching the given criteria.")
+    else:
+        st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
+        vessel_ids = similar_vessels['imo'].tolist()
+        speed_consumption_data = get_speed_consumption_data(engine, vessel_ids)
+        
+        if speed_consumption_data.empty:
+            st.write("No speed, consumption, or power data available for the selected vessels.")
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+            st.write("Data fetched successfully. Ready for model training.")
+            
+            # Placeholder for model training code
+            if selected_model == "Linear Regression with Polynomial Features":
+                st.write("Training Linear Regression with Polynomial Features...")
+                # Add model training code here
+            elif selected_model == "Random Forest":
+                st.write("Training Random Forest Regressor...")
+                # Add model training code here
+            elif selected_model == "MLP Regressor":
+                st.write("Training MLP Regressor...")
+                # Add model training code here
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+            # Placeholder for output table
+            st.write("Creating output table (Speed, Power, Consumption, Displacement)...")
+            # Add code to create and display output table here
+
+# Placeholder for future steps and more details
+st.sidebar.write("Once the model is trained, we will generate output tables and further analyze results.")
