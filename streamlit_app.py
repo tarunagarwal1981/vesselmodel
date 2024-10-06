@@ -50,6 +50,24 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type):
         'deadweight_max': deadweight * 1.05,
         'vessel_type': vessel_type
     }
+    try:
+        print(f"Executing query: {query}")
+        print(f"With parameters: {params}")
+        return pd.read_sql(query, engine, params=params)
+    except Exception as e:
+        st.error(f"Error executing query: {e}")
+        return pd.DataFrame()
+    params = {
+        'lpp_min': lpp * 0.95,
+        'lpp_max': lpp * 1.05,
+        'breadth_min': breadth * 0.95,
+        'breadth_max': breadth * 1.05,
+        'depth_min': depth * 0.95,
+        'depth_max': depth * 1.05,
+        'deadweight_min': deadweight * 0.95,
+        'deadweight_max': deadweight * 1.05,
+        'vessel_type': vessel_type
+    }
     return pd.read_sql(query, engine, params=params)
     return pd.read_sql(query, engine)
 
