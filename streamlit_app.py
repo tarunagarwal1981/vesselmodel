@@ -57,6 +57,22 @@ def get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mc
     }
     return pd.read_sql(query, engine, params=params)
 
+# Function to calculate confidence score
+def calculate_confidence_score(similar_vessels, user_input):
+    kpi_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr']
+    vessel_deviations = []
+
+    for _, vessel in similar_vessels.iterrows():
+        kpi_deviations = []
+        for col in kpi_columns:
+            deviation = abs((vessel[col] - user_input[col]) / user_input[col]) * 100
+            kpi_deviations.append(deviation)
+        vessel_deviations.append(np.mean(kpi_deviations))
+
+    average_deviation = np.mean(vessel_deviations)
+    confidence_score = 100 - average_deviation
+    return round(confidence_score, 2)
+
 # Function to get speed, consumption, power data for selected vessels
 def get_vessel_performance_data(engine, vessel_names):
     query = """
@@ -96,6 +112,12 @@ if st.sidebar.button("Fetch Data and Train Model"):
         st.write("No vessels found matching the given criteria.")
     else:
         st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
+        
+        # Calculate confidence score
+        user_input = {'lpp': lpp, 'breadth': breadth, 'depth': depth, 'deadweight': deadweight, 'mcr': mcr}
+        confidence_score = calculate_confidence_score(similar_vessels, user_input)
+        st.write(f"Confidence Score: {confidence_score}%")
+        
         st.write("Similar Vessels Details:")
         similar_vessels_display = similar_vessels.round({'lpp': 2, 'breadth': 2, 'depth': 2, 'deadweight': 2, 'mcr': 2})
         st.dataframe(similar_vessels_display.set_index('vessel_name'))
