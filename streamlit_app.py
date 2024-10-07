@@ -12,17 +12,10 @@ from database import get_db_engine
 def get_db_connection():
     return get_db_engine()
 
-# Sidebar for model selection and similarity threshold
+# Sidebar for model selection
 st.sidebar.header("Model Selection and Vessel Details")
 model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
 selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
-
-similarity_threshold = st.sidebar.radio(
-    "Select similarity threshold:",
-    [5, 10, 15, 20],
-    format_func=lambda x: f"{x}%",
-    index=0  # Default to 5%
-)
 
 # User Inputs for Vessel Particulars
 lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
@@ -123,13 +116,17 @@ def display_confidence_score(score):
 # Main execution
 if st.sidebar.button("Fetch Data and Train Model"):
     engine = get_db_connection()
-    similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mcr, similarity_threshold)
+    
+    # Automatic similarity threshold adjustment
+    for threshold in [5, 10, 15, 20]:
+        similar_vessels = get_similar_vessels(engine, lpp, breadth, depth, deadweight, vessel_type, mcr, threshold)
+        if not similar_vessels.empty:
+            st.write(f"Found {len(similar_vessels)} vessels matching the criteria with {threshold}% similarity threshold.")
+            break
     
     if similar_vessels.empty:
-        st.write("No vessels found matching the given criteria.")
+        st.write("No vessels found matching the given criteria, even with a 20% similarity threshold.")
     else:
-        st.write(f"Found {len(similar_vessels)} vessels matching the criteria.")
-        
         # Calculate confidence score
         user_input = {'lpp': lpp, 'breadth': breadth, 'depth': depth, 'deadweight': deadweight, 'mcr': mcr}
         confidence_score = calculate_confidence_score(similar_vessels, user_input)
