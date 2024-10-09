@@ -6,6 +6,9 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from database import get_db_engine
 import sqlalchemy
 
@@ -70,7 +73,6 @@ def get_performance_data(engine, imos):
 
 def separate_data(df):
     try:
-        # Since we don't have loading_condition, we'll use a simple split based on deadweight
         df_sorted = df.sort_values('deadweight')
         split_index = len(df) // 2
         ballast = df_sorted.iloc[:split_index]
@@ -83,35 +85,48 @@ def separate_data(df):
         st.error(f"Error in separate_data: {str(e)}")
         return pd.DataFrame(), pd.DataFrame()
 
-def train_model(X, y, model_type):
+def preprocess_data(X, y):
+    # Create a ColumnTransformer for preprocessing
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', SimpleImputer(strategy='mean'), X.columns)
+        ])
+    
+    # Create a pipeline that includes the preprocessor and the model
+    if selected_model == "Linear Regression with Polynomial Features":
+        model = Pipeline([
+            ('preprocessor', preprocessor),
+            ('poly', PolynomialFeatures(degree=2)),
+            ('regressor', LinearRegression())
+        ])
+    elif selected_model == "Random Forest":
+        model = Pipeline([
+            ('preprocessor', preprocessor),
+            ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+        ])
+    else:  # MLP Regressor
+        model = Pipeline([
+            ('preprocessor', preprocessor),
+            ('regressor', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))
+        ])
+    
+    return model, X, y
+
+def train_model(X, y):
     try:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        if model_type == "Linear Regression with Polynomial Features":
-            poly = PolynomialFeatures(degree=2)
-            X_poly = poly.fit_transform(X_train)
-            model = LinearRegression()
-            model.fit(X_poly, y_train)
-        elif model_type == "Random Forest":
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-            model.fit(X_train, y_train)
-        elif model_type == "MLP Regressor":
-            model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
-            model.fit(X_train, y_train)
+        model, X_train, y_train = preprocess_data(X_train, y_train)
+        model.fit(X_train, y_train)
         
         return model
     except Exception as e:
         st.error(f"Error in train_model: {str(e)}")
         return None
 
-def predict_performance(model, input_data, model_type):
+def predict_performance(model, input_data):
     try:
-        if model_type == "Linear Regression with Polynomial Features":
-            poly = PolynomialFeatures(degree=2)
-            input_poly = poly.fit_transform(input_data)
-            return model.predict(input_poly)
-        else:
-            return model.predict(input_data)
+        return model.predict(input_data)
     except Exception as e:
         st.error(f"Error in predict_performance: {str(e)}")
         return None
@@ -149,11 +164,11 @@ if st.sidebar.button("Fetch Data and Train Model"):
                     # Train models
                     input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
                     
-                    ballast_power_model = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], selected_model)
-                    ballast_consumption_model = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], selected_model)
+                    ballast_power_model = train_model(ballast_df[input_columns], ballast_df['me_power_kw'])
+                    ballast_consumption_model = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'])
                     
-                    laden_power_model = train_model(laden_df[input_columns], laden_df['me_power_kw'], selected_model)
-                    laden_consumption_model = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], selected_model)
+                    laden_power_model = train_model(laden_df[input_columns], laden_df['me_power_kw'])
+                    laden_consumption_model = train_model(laden_df[input_columns], laden_df['me_consumption_mt'])
                     
                     if all([ballast_power_model, ballast_consumption_model, laden_power_model, laden_consumption_model]):
                         # Generate predictions
@@ -166,13 +181,14 @@ if st.sidebar.button("Fetch Data and Train Model"):
                         laden_predictions = []
                         
                         for speed in speed_range:
-                            input_data = np.array([[lpp, breadth, depth, deadweight, mcr, speed]])
+                            input_data = pd.DataFrame([[lpp, breadth, depth, deadweight, mcr, speed]], 
+                                                      columns=input_columns)
                             
-                            ballast_power = predict_performance(ballast_power_model, input_data, selected_model)
-                            ballast_consumption = predict_performance(ballast_consumption_model, input_data, selected_model)
+                            ballast_power = predict_performance(ballast_power_model, input_data)
+                            ballast_consumption = predict_performance(ballast_consumption_model, input_data)
                             
-                            laden_power = predict_performance(laden_power_model, input_data, selected_model)
-                            laden_consumption = predict_performance(laden_consumption_model, input_data, selected_model)
+                            laden_power = predict_performance(laden_power_model, input_data)
+                            laden_consumption = predict_performance(laden_consumption_model, input_data)
                             
                             if all([ballast_power is not None, ballast_consumption is not None, 
                                     laden_power is not None, laden_consumption is not None]):
