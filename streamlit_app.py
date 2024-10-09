@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
 import sqlalchemy
-from test import run_test
+from test import run_all_tests
 
 def get_db_connection():
     return get_db_engine()
