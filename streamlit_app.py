@@ -29,6 +29,8 @@ def get_hull_data(engine, vessel_type):
     return df.dropna()
 
 def get_performance_data(engine, imos):
+    # Convert numpy.int64 to regular Python int
+    imos = [int(imo) for imo in imos]
     query = """
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo
     FROM vessel_performance_model_data
