@@ -34,7 +34,7 @@ def get_hull_data(engine, vessel_type):
     try:
         query = """
         SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
-               depth, deadweight, me_1_mcr_kw as mcr, loading_condition as load_type, imo
+               depth, deadweight, me_1_mcr_kw as mcr, imo
         FROM hull_particulars
         WHERE vessel_type = %(vessel_type)s
         """
@@ -52,7 +52,7 @@ def get_hull_data(engine, vessel_type):
 def get_performance_data(engine, imos):
     try:
         query = """
-        SELECT speed_kts, me_consumption_mt, me_power_kw, loading_condition as load_type, vessel_imo
+        SELECT speed_kts, me_consumption_mt, me_power_kw, loading_condition, vessel_imo
         FROM vessel_performance_model_data
         WHERE vessel_imo IN %(imos)s
         """
@@ -67,11 +67,19 @@ def get_performance_data(engine, imos):
         st.error(f"Database error in get_performance_data: {str(e)}")
         return pd.DataFrame()
 
-def separate_data(df, load_type_column):
+def separate_data(df):
     try:
-        ballast = df[df[load_type_column] == 'Ballast']
-        laden = df[(df[load_type_column] == 'Scantling') | (df[load_type_column] == 'Design')]
-        laden = laden.drop_duplicates(subset=['imo' if 'imo' in df.columns else 'vessel_imo'], keep='first')
+        if 'loading_condition' in df.columns:
+            ballast = df[df['loading_condition'] == 'Ballast']
+            laden = df[(df['loading_condition'] == 'Scantling') | (df['loading_condition'] == 'Design')]
+            laden = laden.drop_duplicates(subset=['vessel_imo'], keep='first')
+        else:
+            # If loading_condition is not available, we'll use a simple split
+            df_sorted = df.sort_values('deadweight')
+            split_index = len(df) // 2
+            ballast = df_sorted.iloc[:split_index]
+            laden = df_sorted.iloc[split_index:]
+        
         st.write(f"Debug - Ballast DataFrame shape: {ballast.shape}")
         st.write(f"Debug - Laden DataFrame shape: {laden.shape}")
         return ballast, laden
@@ -127,21 +135,17 @@ if st.sidebar.button("Fetch Data and Train Model"):
             if hull_data.empty:
                 st.error("No hull data retrieved from the database. Please check your input parameters.")
             else:
-                # Separate hull data
-                hull_ballast, hull_laden = separate_data(hull_data, 'load_type')
-                
                 # Get performance data
                 performance_data = get_performance_data(engine, hull_data['imo'].unique())
                 
                 if performance_data.empty:
                     st.error("No performance data retrieved from the database.")
                 else:
-                    # Separate performance data
-                    perf_ballast, perf_laden = separate_data(performance_data, 'load_type')
+                    # Combine hull and performance data
+                    combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo')
                     
-                    # Combine data
-                    ballast_df = pd.merge(hull_ballast, perf_ballast, left_on='imo', right_on='vessel_imo')
-                    laden_df = pd.merge(hull_laden, perf_laden, left_on='imo', right_on='vessel_imo')
+                    # Separate data
+                    ballast_df, laden_df = separate_data(combined_data)
                     
                     st.write(f"Debug - Combined Ballast DataFrame shape: {ballast_df.shape}")
                     st.write(f"Debug - Combined Laden DataFrame shape: {laden_df.shape}")
@@ -174,7 +178,8 @@ if st.sidebar.button("Fetch Data and Train Model"):
                             laden_power = predict_performance(laden_power_model, input_data, selected_model)
                             laden_consumption = predict_performance(laden_consumption_model, input_data, selected_model)
                             
-                            if all([ballast_power, ballast_consumption, laden_power, laden_consumption]):
+                            if all([ballast_power is not None, ballast_consumption is not None, 
+                                    laden_power is not None, laden_consumption is not None]):
                                 ballast_predictions.append({
                                     'Speed (kts)': speed,
                                     'Power (kW)': round(ballast_power[0], 2),
