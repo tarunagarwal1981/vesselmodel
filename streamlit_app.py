@@ -14,18 +14,25 @@ import random
 def get_db_connection():
     return get_db_engine()
 
+st.sidebar.header("Vessel Details and Model Selection")
+lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
+breadth = st.sidebar.number_input("Breadth (m)", min_value=10.0, max_value=100.0, step=0.1)
+depth = st.sidebar.number_input("Depth (m)", min_value=5.0, max_value=50.0, step=0.1)
+deadweight = st.sidebar.number_input("Deadweight (tons)", min_value=1000, max_value=500000, step=100)
+mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_value=100000, step=100)
+vessel_type = st.sidebar.selectbox("Vessel Type", ["BULK CARRIER", "CONTAINER", "OIL TANKER"])
+
 # Model selection
 model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
+selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
-def get_hull_data(engine, vessel_type, limit=None):
+def get_hull_data(engine, vessel_type):
     query = """
     SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
            depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
-    if limit:
-        query += f" ORDER BY RANDOM() LIMIT {limit}"
     df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
     return df.dropna()
 
@@ -77,99 +84,154 @@ def predict_performance(model, scaler, input_data, model_type):
         prediction = model.predict(input_poly)
     else:
         prediction = model.predict(input_scaled)
-    return np.maximum(0, prediction)
+    return max(0, prediction[0])
+
+def get_random_bulk_carriers(engine, n=10):
+    query = """
+    SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
+           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
+    FROM hull_particulars
+    WHERE vessel_type = 'BULK CARRIER'
+    ORDER BY RANDOM()
+    LIMIT %(n)s
+    """
+    df = pd.read_sql(query, engine, params={'n': n})
+    return df
 
 def calculate_percentage_difference(actual, predicted):
-    return np.abs((actual - predicted) / actual) * 100
+    return abs(actual - predicted) / actual * 100
 
-def main():
-    st.title("Vessel Performance Prediction Model Testing")
-
-    try:
-        engine = get_db_connection()
+def run_test():
+    engine = get_db_connection()
+    test_vessels = get_random_bulk_carriers(engine)
+    
+    all_results = {}
+    
+    for model_type in model_options:
+        st.subheader(f"Testing {model_type}")
         
-        # Get 10 random bulk carriers
-        test_vessels = get_hull_data(engine, "BULK CARRIER", limit=10)
-        
-        # Get performance data for test vessels
-        performance_data = get_performance_data(engine, test_vessels['imo'].unique())
-        
-        # Combine hull and performance data
-        combined_data = pd.merge(test_vessels, performance_data, left_on='imo', right_on='vessel_imo')
-        
-        # Separate data into ballast and laden conditions
+        # Get all bulk carrier data for training
+        all_bulk_carriers = get_hull_data(engine, "BULK CARRIER")
+        all_performance_data = get_performance_data(engine, all_bulk_carriers['imo'].unique())
+        combined_data = pd.merge(all_bulk_carriers, all_performance_data, left_on='imo', right_on='vessel_imo').dropna()
         ballast_df, laden_df = separate_data(combined_data)
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
-        results = {}
+        # Train models
+        ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
+        ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
+        laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
+        laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
         
-        for model_type in model_options:
-            st.subheader(f"Results for {model_type}")
+        results = []
+        
+        for _, vessel in test_vessels.iterrows():
+            vessel_performance = get_performance_data(engine, [vessel['imo']])
+            ballast_perf, laden_perf = separate_data(vessel_performance)
             
-            # Train models
-            ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
-            ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
-            laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
-            laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
-            
-            # Initialize results dictionary for this model
-            results[model_type] = {
-                'ballast_power': [], 'ballast_consumption': [],
-                'laden_power': [], 'laden_consumption': []
-            }
-            
-            # Generate predictions and calculate differences
             for speed in range(8, 16):
-                ballast_power_diff = []
-                ballast_consumption_diff = []
-                laden_power_diff = []
-                laden_consumption_diff = []
+                input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], vessel['deadweight'], vessel['mcr'], speed]], columns=input_columns)
                 
-                for _, vessel in test_vessels.iterrows():
-                    input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], 
-                                                vessel['deadweight'], vessel['mcr'], speed]], 
-                                              columns=input_columns)
-                    
-                    # Ballast predictions
-                    ballast_power_pred = predict_performance(ballast_power_model, ballast_power_scaler, input_data, model_type)[0]
-                    ballast_consumption_pred = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, model_type)[0]
-                    
-                    # Laden predictions
-                    laden_power_pred = predict_performance(laden_power_model, laden_power_scaler, input_data, model_type)[0]
-                    laden_consumption_pred = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, model_type)[0]
-                    
-                    # Get actual values
-                    ballast_actual = ballast_df[(ballast_df['imo'] == vessel['imo']) & (ballast_df['speed_kts'].round() == speed)]
-                    laden_actual = laden_df[(laden_df['imo'] == vessel['imo']) & (laden_df['speed_kts'].round() == speed)]
-                    
-                    if not ballast_actual.empty:
-                        ballast_power_diff.append(calculate_percentage_difference(ballast_actual['me_power_kw'].values[0], ballast_power_pred))
-                        ballast_consumption_diff.append(calculate_percentage_difference(ballast_actual['me_consumption_mt'].values[0], ballast_consumption_pred))
-                    
-                    if not laden_actual.empty:
-                        laden_power_diff.append(calculate_percentage_difference(laden_actual['me_power_kw'].values[0], laden_power_pred))
-                        laden_consumption_diff.append(calculate_percentage_difference(laden_actual['me_consumption_mt'].values[0], laden_consumption_pred))
+                # Ballast predictions
+                predicted_ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data, model_type)
+                predicted_ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, model_type)
                 
-                # Calculate average differences
-                results[model_type]['ballast_power'].append(np.mean(ballast_power_diff) if ballast_power_diff else np.nan)
-                results[model_type]['ballast_consumption'].append(np.mean(ballast_consumption_diff) if ballast_consumption_diff else np.nan)
-                results[model_type]['laden_power'].append(np.mean(laden_power_diff) if laden_power_diff else np.nan)
-                results[model_type]['laden_consumption'].append(np.mean(laden_consumption_diff) if laden_consumption_diff else np.nan)
-            
-            # Create and display results table
-            results_df = pd.DataFrame({
-                'Speed (kts)': range(8, 16),
-                'Ballast Power % Diff': results[model_type]['ballast_power'],
-                'Ballast Consumption % Diff': results[model_type]['ballast_consumption'],
-                'Laden Power % Diff': results[model_type]['laden_power'],
-                'Laden Consumption % Diff': results[model_type]['laden_consumption']
-            }).set_index('Speed (kts)')
-            
-            st.dataframe(results_df.style.format("{:.2f}"))
+                # Laden predictions
+                predicted_laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data, model_type)
+                predicted_laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, model_type)
+                
+                # Actual values (if available)
+                actual_ballast = ballast_perf[ballast_perf['speed_kts'].round() == speed]
+                actual_laden = laden_perf[laden_perf['speed_kts'].round() == speed]
+                
+                if not actual_ballast.empty:
+                    results.append({
+                        'Speed': speed,
+                        'Condition': 'Ballast',
+                        'Power_Diff': calculate_percentage_difference(actual_ballast['me_power_kw'].values[0], predicted_ballast_power),
+                        'Consumption_Diff': calculate_percentage_difference(actual_ballast['me_consumption_mt'].values[0], predicted_ballast_consumption)
+                    })
+                
+                if not actual_laden.empty:
+                    results.append({
+                        'Speed': speed,
+                        'Condition': 'Laden',
+                        'Power_Diff': calculate_percentage_difference(actual_laden['me_power_kw'].values[0], predicted_laden_power),
+                        'Consumption_Diff': calculate_percentage_difference(actual_laden['me_consumption_mt'].values[0], predicted_laden_consumption)
+                    })
+        
+        results_df = pd.DataFrame(results)
+        all_results[model_type] = results_df
+        
+        # Display average differences
+        avg_diff = results_df.groupby(['Speed', 'Condition']).mean().reset_index()
+        st.write(avg_diff)
     
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+    return all_results
 
-if __name__ == "__main__":
-    main()
+# Main execution
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("Generate Predictions"):
+        try:
+            engine = get_db_connection()
+            hull_data = get_hull_data(engine, vessel_type)
+            performance_data = get_performance_data(engine, hull_data['imo'].unique())
+            
+            combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo').dropna()
+            ballast_df, laden_df = separate_data(combined_data)
+            
+            input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
+            
+            ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], selected_model)
+            ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], selected_model)
+            laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], selected_model)
+            laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], selected_model)
+            
+            speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
+            
+            ballast_predictions = []
+            laden_predictions = []
+            
+            for speed in speed_range:
+                input_data = pd.DataFrame([[lpp, breadth, depth, deadweight, mcr, speed]], columns=input_columns)
+                
+                ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data, selected_model)
+                ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, selected_model)
+                laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data, selected_model)
+                laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, selected_model)
+                
+                ballast_predictions.append({
+                    'Speed (kts)': speed,
+                    'Power (kW)': round(ballast_power, 2),
+                    'Consumption (mt/day)': round(ballast_consumption, 2)
+                })
+                
+                laden_predictions.append({
+                    'Speed (kts)': speed,
+                    'Power (kW)': round(laden_power, 2),
+                    'Consumption (mt/day)': round(laden_consumption, 2)
+                })
+            
+            st.subheader("Predicted Performance")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("Ballast Condition")
+                st.dataframe(pd.DataFrame(ballast_predictions).set_index('Speed (kts)'))
+            
+            with col2:
+                st.write("Laden Condition")
+                st.dataframe(pd.DataFrame(laden_predictions).set_index('Speed (kts)'))
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+
+with col2:
+    if st.button("Run Test"):
+        test_results = run_test()
+        st.subheader("Test Results Summary")
+        for model, results in test_results.items():
+            st.write(f"Model: {model}")
+            st.write(results.groupby(['Speed', 'Condition']).mean().reset_index())
+            st.write("---")
