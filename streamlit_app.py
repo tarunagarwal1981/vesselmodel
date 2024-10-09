@@ -51,13 +51,15 @@ def get_hull_data(engine, vessel_type):
 
 def get_performance_data(engine, imos):
     try:
+        # Convert numpy.int64 to regular Python int
+        imos = [int(imo) for imo in imos]
         query = """
         SELECT speed_kts, me_consumption_mt, me_power_kw, loading_condition, vessel_imo
         FROM vessel_performance_model_data
         WHERE vessel_imo IN %(imos)s
         """
         st.write(f"Debug - Performance SQL Query: {query}")
-        st.write(f"Debug - IMOs: {imos}")
+        st.write(f"Debug - Number of IMOs: {len(imos)}")
         
         df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
         st.write(f"Debug - Performance DataFrame columns: {df.columns}")
