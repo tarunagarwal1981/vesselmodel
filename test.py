@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
 import logging
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -134,17 +135,25 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
             logging.warning(f"No test vessels found for {vessel_type}")
             return None
         
+        logging.info(f"Number of test vessels: {len(test_vessels)}")
+        
         performance_data = get_performance_data(engine, test_vessels['imo'].unique())
         if performance_data.empty:
             logging.warning(f"No performance data found for {vessel_type}")
             return None
+        
+        logging.info(f"Number of performance data rows: {len(performance_data)}")
         
         combined_data = pd.merge(test_vessels, performance_data, left_on='imo', right_on='vessel_imo')
         if combined_data.empty:
             logging.warning(f"No matching data found after merging for {vessel_type}")
             return None
         
+        logging.info(f"Number of combined data rows: {len(combined_data)}")
+        
         ballast_df, laden_df = separate_data(combined_data)
+        
+        logging.info(f"Number of ballast rows: {len(ballast_df)}, Number of laden rows: {len(laden_df)}")
         
         if ballast_df.empty and laden_df.empty:
             logging.warning(f"Insufficient data after separation for {vessel_type}")
@@ -187,9 +196,17 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
                     else:
                         results[key].append(np.nan)
         
+        logging.info("Results before processing:")
+        for key, value in results.items():
+            logging.info(f"{key}: length = {len(value)}, sample = {value[:5]}")
+        
         # Ensure all lists in results have the same length
         max_length = max(len(v) for v in results.values())
         results = {k: v + [np.nan] * (max_length - len(v)) for k, v in results.items()}
+        
+        logging.info("Results after padding:")
+        for key, value in results.items():
+            logging.info(f"{key}: length = {len(value)}, sample = {value[:5]}")
         
         # Calculate averages for each speed
         speed_results = {
@@ -205,13 +222,20 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
                 avg = np.nanmean(results[key][i:i+10])
                 speed_results[key.replace('_', ' ').title() + ' % Diff'].append(avg)
         
+        logging.info("Speed results before DataFrame creation:")
+        for key, value in speed_results.items():
+            logging.info(f"{key}: length = {len(value)}, value = {value}")
+        
         results_df = pd.DataFrame(speed_results).set_index('Speed (kts)')
+        
+        logging.info(f"Final results DataFrame shape: {results_df.shape}")
+        logging.info(f"Final results DataFrame columns: {results_df.columns}")
         
         return results_df
     except Exception as e:
         logging.error(f"Error in run_test_for_vessel_type for {vessel_type} and {model_type}: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         return None
-        
 def run_test():
     try:
         engine = get_db_connection()
