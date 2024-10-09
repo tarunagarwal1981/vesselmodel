@@ -1,4 +1,3 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -8,153 +7,181 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
 import sqlalchemy
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_db_connection():
-    return get_db_engine()
+    try:
+        return get_db_engine()
+    except Exception as e:
+        logging.error(f"Failed to establish database connection: {str(e)}")
+        return None
 
 # Model selection
 model_options = ["Linear Regression with Polynomial Features", "Random Forest"]
 vessel_types = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
 
 def get_hull_data(engine, vessel_type, limit=10):
-    query = """
-    SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
-           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
-    FROM hull_particulars
-    WHERE vessel_type = %(vessel_type)s
-    ORDER BY RANDOM() LIMIT %(limit)s
-    """
-    df = pd.read_sql(query, engine, params={'vessel_type': vessel_type, 'limit': limit})
-    return df.dropna()
+    try:
+        query = """
+        SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
+               depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
+        FROM hull_particulars
+        WHERE vessel_type = %(vessel_type)s
+        ORDER BY RANDOM() LIMIT %(limit)s
+        """
+        df = pd.read_sql(query, engine, params={'vessel_type': vessel_type, 'limit': limit})
+        return df.dropna()
+    except Exception as e:
+        logging.error(f"Error fetching hull data for {vessel_type}: {str(e)}")
+        return pd.DataFrame()
 
 def get_performance_data(engine, imos):
-    imos = [int(imo) for imo in imos]
-    query = """
-    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
-    FROM vessel_performance_model_data
-    WHERE vessel_imo IN %(imos)s
-    """
-    df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
-    return df.dropna()
+    try:
+        imos = [int(imo) for imo in imos]
+        query = """
+        SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
+        FROM vessel_performance_model_data
+        WHERE vessel_imo IN %(imos)s
+        """
+        df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
+        return df.dropna()
+    except Exception as e:
+        logging.error(f"Error fetching performance data: {str(e)}")
+        return pd.DataFrame()
 
 def separate_data(df):
-    ballast_df = df[df['load_type'] == 'Ballast']
-    laden_df = df[df['load_type'].isin(['Scantling', 'Design'])]
-    
-    if 'Scantling' in laden_df['load_type'].values:
-        laden_df = laden_df[laden_df['load_type'] == 'Scantling']
-    else:
-        laden_df = laden_df[laden_df['load_type'] == 'Design']
-    
-    return ballast_df, laden_df
+    try:
+        ballast_df = df[df['load_type'] == 'Ballast']
+        laden_df = df[df['load_type'].isin(['Scantling', 'Design'])]
+        
+        if 'Scantling' in laden_df['load_type'].values:
+            laden_df = laden_df[laden_df['load_type'] == 'Scantling']
+        else:
+            laden_df = laden_df[laden_df['load_type'] == 'Design']
+        
+        return ballast_df, laden_df
+    except Exception as e:
+        logging.error(f"Error separating data: {str(e)}")
+        return pd.DataFrame(), pd.DataFrame()
 
 def train_model(X, y, model_type):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    
-    if model_type == "Linear Regression with Polynomial Features":
-        poly = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X_train_scaled)
-        model = LinearRegression()
-        model.fit(X_poly, y_train)
-    elif model_type == "Random Forest":
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train_scaled, y_train)
-    
-    return model, scaler
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        
+        if model_type == "Linear Regression with Polynomial Features":
+            poly = PolynomialFeatures(degree=2)
+            X_poly = poly.fit_transform(X_train_scaled)
+            model = LinearRegression()
+            model.fit(X_poly, y_train)
+        elif model_type == "Random Forest":
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X_train_scaled, y_train)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+        
+        return model, scaler
+    except Exception as e:
+        logging.error(f"Error training model {model_type}: {str(e)}")
+        return None, None
 
 def predict_performance(model, scaler, input_data, model_type):
-    input_scaled = scaler.transform(input_data)
-    if model_type == "Linear Regression with Polynomial Features":
-        poly = PolynomialFeatures(degree=2)
-        input_poly = poly.fit_transform(input_scaled)
-        prediction = model.predict(input_poly)
-    else:
-        prediction = model.predict(input_scaled)
-    return np.maximum(0, prediction)
+    try:
+        input_scaled = scaler.transform(input_data)
+        if model_type == "Linear Regression with Polynomial Features":
+            poly = PolynomialFeatures(degree=2)
+            input_poly = poly.fit_transform(input_scaled)
+            prediction = model.predict(input_poly)
+        else:
+            prediction = model.predict(input_scaled)
+        return np.maximum(0, prediction)
+    except Exception as e:
+        logging.error(f"Error predicting performance for {model_type}: {str(e)}")
+        return np.array([])
 
 def calculate_percentage_difference(actual, predicted):
-    return np.abs((actual - predicted) / actual) * 100
+    try:
+        return np.abs((actual - predicted) / actual) * 100
+    except Exception as e:
+        logging.error(f"Error calculating percentage difference: {str(e)}")
+        return np.nan
 
 def run_test_for_vessel_type(engine, vessel_type, model_type):
-    # Get 10 random vessels of the current type
-    test_vessels = get_hull_data(engine, vessel_type, limit=10)
-    
-    # Get performance data for test vessels
-    performance_data = get_performance_data(engine, test_vessels['imo'].unique())
-    
-    # Combine hull and performance data
-    combined_data = pd.merge(test_vessels, performance_data, left_on='imo', right_on='vessel_imo')
-    
-    # Separate data into ballast and laden conditions
-    ballast_df, laden_df = separate_data(combined_data)
-    
-    input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
-    
-    # Train models
-    ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
-    ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
-    laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
-    laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
-    
-    results = {
-        'ballast_power': [], 'ballast_consumption': [],
-        'laden_power': [], 'laden_consumption': []
-    }
-    
-    ## Generate predictions and calculate differences
-    for speed in range(8, 16):
-        ballast_power_diff = []
-        ballast_consumption_diff = []
-        laden_power_diff = []
-        laden_consumption_diff = []
+    try:
+        logging.info(f"Running test for {vessel_type} using {model_type}")
         
-        for _, vessel in test_vessels.iterrows():
-            input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], 
-                                        vessel['deadweight'], vessel['mcr'], speed]], 
-                                      columns=input_columns)
-            
-            # Ballast predictions
-            ballast_power_pred = predict_performance(ballast_power_model, ballast_power_scaler, input_data, model_type)[0]
-            ballast_consumption_pred = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, model_type)[0]
-            
-            # Laden predictions
-            laden_power_pred = predict_performance(laden_power_model, laden_power_scaler, input_data, model_type)[0]
-            laden_consumption_pred = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, model_type)[0]
-            
-            # Get actual values
-            ballast_actual = ballast_df[(ballast_df['imo'] == vessel['imo']) & (ballast_df['speed_kts'].round() == speed)]
-            laden_actual = laden_df[(laden_df['imo'] == vessel['imo']) & (laden_df['speed_kts'].round() == speed)]
-            
-            if not ballast_actual.empty:
-                ballast_power_diff.append(calculate_percentage_difference(ballast_actual['me_power_kw'].values[0], ballast_power_pred))
-                ballast_consumption_diff.append(calculate_percentage_difference(ballast_actual['me_consumption_mt'].values[0], ballast_consumption_pred))
-            
-            if not laden_actual.empty:
-                laden_power_diff.append(calculate_percentage_difference(laden_actual['me_power_kw'].values[0], laden_power_pred))
-                laden_consumption_diff.append(calculate_percentage_difference(laden_actual['me_consumption_mt'].values[0], laden_consumption_pred))
+        test_vessels = get_hull_data(engine, vessel_type, limit=10)
+        if test_vessels.empty:
+            logging.warning(f"No test vessels found for {vessel_type}")
+            return None
         
-        # Calculate average differences
-        results['ballast_power'].append(np.mean(ballast_power_diff) if ballast_power_diff else np.nan)
-        results['ballast_consumption'].append(np.mean(ballast_consumption_diff) if ballast_consumption_diff else np.nan)
-        results['laden_power'].append(np.mean(laden_power_diff) if laden_power_diff else np.nan)
-        results['laden_consumption'].append(np.mean(laden_consumption_diff) if laden_consumption_diff else np.nan)
-    
-    # Create results table
-    results_df = pd.DataFrame({
-        'Speed (kts)': range(8, 16),
-        'Ballast Power % Diff from Actual': results['ballast_power'],
-        'Ballast Consumption % Diff from Actual': results['ballast_consumption'],
-        'Laden Power % Diff from Actual': results['laden_power'],
-        'Laden Consumption % Diff from Actual': results['laden_consumption']
-    }).set_index('Speed (kts)')
-    
-    return results_df
+        performance_data = get_performance_data(engine, test_vessels['imo'].unique())
+        if performance_data.empty:
+            logging.warning(f"No performance data found for {vessel_type}")
+            return None
+        
+        combined_data = pd.merge(test_vessels, performance_data, left_on='imo', right_on='vessel_imo')
+        ballast_df, laden_df = separate_data(combined_data)
+        
+        if ballast_df.empty or laden_df.empty:
+            logging.warning(f"Insufficient data after separation for {vessel_type}")
+            return None
+        
+        input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
+        
+        models = {
+            'ballast_power': train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type),
+            'ballast_consumption': train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type),
+            'laden_power': train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type),
+            'laden_consumption': train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
+        }
+        
+        results = {key: [] for key in models.keys()}
+        
+        for speed in range(8, 16):
+            for _, vessel in test_vessels.iterrows():
+                input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], 
+                                            vessel['deadweight'], vessel['mcr'], speed]], 
+                                          columns=input_columns)
+                
+                for key, (model, scaler) in models.items():
+                    if model is None or scaler is None:
+                        continue
+                    
+                    prediction = predict_performance(model, scaler, input_data, model_type)
+                    if prediction.size == 0:
+                        continue
+                    
+                    df = ballast_df if 'ballast' in key else laden_df
+                    actual = df[(df['imo'] == vessel['imo']) & (df['speed_kts'].round() == speed)]
+                    
+                    if not actual.empty:
+                        actual_value = actual['me_power_kw'].values[0] if 'power' in key else actual['me_consumption_mt'].values[0]
+                        diff = calculate_percentage_difference(actual_value, prediction[0])
+                        results[key].append(diff)
+        
+        results_df = pd.DataFrame({
+            'Speed (kts)': range(8, 16),
+            'Ballast Power % Diff': [np.mean(results['ballast_power'][i:i+10]) for i in range(0, len(results['ballast_power']), 10)],
+            'Ballast Consumption % Diff': [np.mean(results['ballast_consumption'][i:i+10]) for i in range(0, len(results['ballast_consumption']), 10)],
+            'Laden Power % Diff': [np.mean(results['laden_power'][i:i+10]) for i in range(0, len(results['laden_power']), 10)],
+            'Laden Consumption % Diff': [np.mean(results['laden_consumption'][i:i+10]) for i in range(0, len(results['laden_consumption']), 10)]
+        }).set_index('Speed (kts)')
+        
+        return results_df
+    except Exception as e:
+        logging.error(f"Error in run_test_for_vessel_type for {vessel_type} and {model_type}: {str(e)}")
+        return None
 
 def run_test():
     try:
         engine = get_db_connection()
+        if engine is None:
+            return None
         
         all_results = {}
         
@@ -163,25 +190,35 @@ def run_test():
             
             for model_type in model_options:
                 results_df = run_test_for_vessel_type(engine, vessel_type, model_type)
-                vessel_results[model_type] = results_df
+                if results_df is not None and not results_df.empty:
+                    vessel_results[model_type] = results_df
+                else:
+                    logging.warning(f"No valid results for {vessel_type} and {model_type}")
             
-            all_results[vessel_type] = vessel_results
+            if vessel_results:
+                all_results[vessel_type] = vessel_results
         
         return all_results
 
     except Exception as e:
-        st.error(f"An error occurred during testing: {str(e)}")
+        logging.error(f"An error occurred during testing: {str(e)}")
         return None
 
 if __name__ == "__main__":
-    st.title("Vessel Performance Prediction Model Testing")
+    print("Running tests...")
     test_results = run_test()
     
     if test_results:
         for vessel_type, vessel_results in test_results.items():
-            st.header(f"Results for {vessel_type}")
+            print(f"\nResults for {vessel_type}")
             
             for model_type, results_df in vessel_results.items():
-                st.subheader(f"Model: {model_type}")
-                st.dataframe(results_df.style.format("{:.2f}"))
-                st.write("---")
+                print(f"\nModel: {model_type}")
+                if isinstance(results_df, pd.DataFrame) and not results_df.empty:
+                    print(results_df)
+                    print("\nMean values:")
+                    print(results_df.mean())
+                else:
+                    print("No valid results for this model.")
+    else:
+        print("No test results were returned. Please check the logs for more information.")
