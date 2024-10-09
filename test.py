@@ -6,7 +6,6 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
-import sqlalchemy
 import logging
 
 # Set up logging
@@ -20,8 +19,8 @@ def get_db_connection():
         return None
 
 # Model selection
-model_options = ["Linear Regression with Polynomial Features", "Random Forest"]
-vessel_types = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
+MODEL_OPTIONS = ["Linear Regression with Polynomial Features", "Random Forest"]
+VESSEL_TYPES = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
 
 def get_hull_data(engine, vessel_type, limit=10):
     try:
@@ -63,8 +62,10 @@ def separate_data(df):
         
         if 'Scantling' in laden_df['load_type'].values:
             laden_df = laden_df[laden_df['load_type'] == 'Scantling']
-        else:
+        elif 'Design' in laden_df['load_type'].values:
             laden_df = laden_df[laden_df['load_type'] == 'Design']
+        else:
+            laden_df = pd.DataFrame()  # Empty DataFrame if no matching load_type
         
         return ballast_df, laden_df
     except Exception as e:
@@ -117,6 +118,9 @@ def predict_performance(model, scaler, input_data, model_type):
 def calculate_percentage_difference(actual, predicted):
     try:
         return np.abs((actual - predicted) / actual) * 100
+    except ZeroDivisionError:
+        logging.warning("Encountered zero division in percentage difference calculation.")
+        return np.nan
     except Exception as e:
         logging.error(f"Error calculating percentage difference: {str(e)}")
         return np.nan
@@ -179,12 +183,16 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
                         diff = calculate_percentage_difference(actual_value, prediction[0])
                         results[key].append(diff)
         
+        # Ensure all lists in results have the same length
+        max_length = max(len(v) for v in results.values())
+        results = {k: v + [np.nan] * (max_length - len(v)) for k, v in results.items()}
+        
         results_df = pd.DataFrame({
             'Speed (kts)': range(8, 16),
-            'Ballast Power % Diff': [np.mean(results['ballast_power'][i:i+10]) if results['ballast_power'] else np.nan for i in range(0, 80, 10)],
-            'Ballast Consumption % Diff': [np.mean(results['ballast_consumption'][i:i+10]) if results['ballast_consumption'] else np.nan for i in range(0, 80, 10)],
-            'Laden Power % Diff': [np.mean(results['laden_power'][i:i+10]) if results['laden_power'] else np.nan for i in range(0, 80, 10)],
-            'Laden Consumption % Diff': [np.mean(results['laden_consumption'][i:i+10]) if results['laden_consumption'] else np.nan for i in range(0, 80, 10)]
+            'Ballast Power % Diff': [np.nanmean(results['ballast_power'][i:i+10]) for i in range(0, len(results['ballast_power']), 10)],
+            'Ballast Consumption % Diff': [np.nanmean(results['ballast_consumption'][i:i+10]) for i in range(0, len(results['ballast_consumption']), 10)],
+            'Laden Power % Diff': [np.nanmean(results['laden_power'][i:i+10]) for i in range(0, len(results['laden_power']), 10)],
+            'Laden Consumption % Diff': [np.nanmean(results['laden_consumption'][i:i+10]) for i in range(0, len(results['laden_consumption']), 10)]
         }).set_index('Speed (kts)')
         
         return results_df
@@ -200,10 +208,10 @@ def run_test():
         
         all_results = {}
         
-        for vessel_type in vessel_types:
+        for vessel_type in VESSEL_TYPES:
             vessel_results = {}
             
-            for model_type in model_options:
+            for model_type in MODEL_OPTIONS:
                 results_df = run_test_for_vessel_type(engine, vessel_type, model_type)
                 if results_df is not None and not results_df.empty:
                     vessel_results[model_type] = results_df
