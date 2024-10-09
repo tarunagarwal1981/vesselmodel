@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
@@ -10,13 +13,17 @@ import sqlalchemy
 def get_db_connection():
     return get_db_engine()
 
-st.sidebar.header("Vessel Details")
+st.sidebar.header("Vessel Details and Model Selection")
 lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
 breadth = st.sidebar.number_input("Breadth (m)", min_value=10.0, max_value=100.0, step=0.1)
 depth = st.sidebar.number_input("Depth (m)", min_value=5.0, max_value=50.0, step=0.1)
 deadweight = st.sidebar.number_input("Deadweight (tons)", min_value=1000, max_value=500000, step=100)
 mcr = st.sidebar.number_input("MCR of Main Engine (kW)", min_value=500, max_value=100000, step=100)
 vessel_type = st.sidebar.selectbox("Vessel Type", ["BULK CARRIER", "CONTAINER", "OIL TANKER"])
+
+# Model selection
+model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
+selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
 def get_hull_data(engine, vessel_type):
     query = """
@@ -29,7 +36,6 @@ def get_hull_data(engine, vessel_type):
     return df.dropna()
 
 def get_performance_data(engine, imos):
-    # Convert numpy.int64 to regular Python int
     imos = [int(imo) for imo in imos]
     query = """
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo
@@ -44,17 +50,33 @@ def separate_data(df):
     split_index = len(df) // 2
     return df_sorted.iloc[:split_index], df_sorted.iloc[split_index:]
 
-def train_model(X, y):
+def train_model(X, y, model_type):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train_scaled, y_train)
+    
+    if model_type == "Linear Regression with Polynomial Features":
+        poly = PolynomialFeatures(degree=2)
+        X_poly = poly.fit_transform(X_train_scaled)
+        model = LinearRegression()
+        model.fit(X_poly, y_train)
+    elif model_type == "Random Forest":
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train_scaled, y_train)
+    elif model_type == "MLP Regressor":
+        model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42)
+        model.fit(X_train_scaled, y_train)
+    
     return model, scaler
 
-def predict_performance(model, scaler, input_data):
+def predict_performance(model, scaler, input_data, model_type):
     input_scaled = scaler.transform(input_data)
-    prediction = model.predict(input_scaled)
+    if model_type == "Linear Regression with Polynomial Features":
+        poly = PolynomialFeatures(degree=2)
+        input_poly = poly.fit_transform(input_scaled)
+        prediction = model.predict(input_poly)
+    else:
+        prediction = model.predict(input_scaled)
     return max(0, prediction[0])
 
 if st.sidebar.button("Generate Predictions"):
@@ -68,10 +90,10 @@ if st.sidebar.button("Generate Predictions"):
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
-        ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'])
-        ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'])
-        laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'])
-        laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'])
+        ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], selected_model)
+        ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], selected_model)
+        laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], selected_model)
+        laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], selected_model)
         
         speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
         
@@ -81,10 +103,10 @@ if st.sidebar.button("Generate Predictions"):
         for speed in speed_range:
             input_data = pd.DataFrame([[lpp, breadth, depth, deadweight, mcr, speed]], columns=input_columns)
             
-            ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data)
-            ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data)
-            laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data)
-            laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data)
+            ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data, selected_model)
+            ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, selected_model)
+            laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data, selected_model)
+            laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, selected_model)
             
             ballast_predictions.append({
                 'Speed (kts)': speed,
