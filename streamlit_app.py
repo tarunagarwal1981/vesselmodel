@@ -14,6 +14,8 @@ from test import run_test
 def get_db_connection():
     return get_db_engine()
 
+st.set_page_config(page_title="Vessel Performance Prediction", layout="wide")
+
 st.sidebar.header("Vessel Details and Model Selection")
 lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
 breadth = st.sidebar.number_input("Breadth (m)", min_value=10.0, max_value=100.0, step=0.1)
@@ -26,15 +28,13 @@ vessel_type = st.sidebar.selectbox("Vessel Type", ["BULK CARRIER", "CONTAINER", 
 model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
 selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
-def get_hull_data(engine, vessel_type, limit=None):
+def get_hull_data(engine, vessel_type):
     query = """
     SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
            depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
-    if limit:
-        query += f" ORDER BY RANDOM() LIMIT {limit}"
     df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
     return df.dropna()
 
@@ -160,10 +160,22 @@ if st.sidebar.button("Generate Predictions"):
 
 # Add the "Run Test" button below the "Generate Predictions" button in the sidebar
 if st.sidebar.button("Run Test"):
-    test_results = run_test()
+    with st.spinner("Running tests..."):
+        test_results = run_test()
+    
     if test_results:
         st.subheader("Test Results Summary")
-        for model, results in test_results.items():
-            st.write(f"Model: {model}")
-            st.write(pd.DataFrame(results).mean())
-            st.write("---")
+        for vessel_type, vessel_results in test_results.items():
+            st.write(f"Vessel Type: {vessel_type}")
+            for model_type, model_results in vessel_results.items():
+                st.write(f"Model: {model_type}")
+                if isinstance(model_results, pd.DataFrame) and not model_results.empty:
+                    st.dataframe(model_results.style.format("{:.2f}"))
+                    st.write("Mean values:")
+                    mean_values = model_results.mean().to_frame().T
+                    st.dataframe(mean_values.style.format("{:.2f}"))
+                else:
+                    st.write("No valid results for this model.")
+                st.write("---")
+    else:
+        st.error("No test results were returned. Please check the logs for more information.")
