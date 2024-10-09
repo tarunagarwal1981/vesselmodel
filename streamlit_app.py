@@ -159,98 +159,19 @@ if st.sidebar.button("Generate Predictions"):
         st.error(f"An error occurred: {str(e)}")
 
 # Add the "Run Test" button below the "Generate Predictions" button in the sidebar
-def run_test():
-    try:
-        engine = get_db_connection()
-        test_results = {}
-
-        for vessel_type in ["BULK CARRIER", "CONTAINER", "OIL TANKER"]:
-            test_results[vessel_type] = {}
-
-            # Get random vessels
-            query = f"""
-            SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
-                   depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
-            FROM hull_particulars
-            WHERE vessel_type = '{vessel_type}'
-            ORDER BY RANDOM()
-            LIMIT 10
-            """
-            random_vessels = pd.read_sql(query, engine).dropna()
-
-            # Get performance data for these vessels
-            imos = random_vessels['imo'].tolist()
-            performance_data = get_performance_data(engine, imos)
-
-            # Merge hull data with performance data
-            combined_data = pd.merge(random_vessels, performance_data, left_on='imo', right_on='vessel_imo').dropna()
-
-            # Separate data into ballast and laden conditions
-            ballast_df, laden_df = separate_data(combined_data)
-
-            input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
-
-            for model_type in ["Linear Regression with Polynomial Features", "Random Forest"]:
-                ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
-                ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
-                laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
-                laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
-
-                ballast_results = []
-                laden_results = []
-
-                for _, vessel in random_vessels.iterrows():
-                    vessel_ballast = ballast_df[ballast_df['imo'] == vessel['imo']]
-                    vessel_laden = laden_df[laden_df['imo'] == vessel['imo']]
-
-                    for df, results, power_model, power_scaler, consumption_model, consumption_scaler in [
-                        (vessel_ballast, ballast_results, ballast_power_model, ballast_power_scaler, ballast_consumption_model, ballast_consumption_scaler),
-                        (vessel_laden, laden_results, laden_power_model, laden_power_scaler, laden_consumption_model, laden_consumption_scaler)
-                    ]:
-                        if not df.empty:
-                            input_data = df[input_columns]
-                            predicted_power = predict_performance(power_model, power_scaler, input_data, model_type)
-                            predicted_consumption = predict_performance(consumption_model, consumption_scaler, input_data, model_type)
-
-                            actual_power = df['me_power_kw'].values
-                            actual_consumption = df['me_consumption_mt'].values
-
-                            power_diff = np.abs((actual_power - predicted_power) / actual_power * 100)
-                            consumption_diff = np.abs((actual_consumption - predicted_consumption) / actual_consumption * 100)
-
-                            results.append({
-                                'Vessel': vessel['vessel_name'],
-                                'Power Diff (%)': np.mean(power_diff),
-                                'Consumption Diff (%)': np.mean(consumption_diff)
-                            })
-
-                test_results[vessel_type][model_type] = {
-                    'Ballast': pd.DataFrame(ballast_results),
-                    'Laden': pd.DataFrame(laden_results)
-                }
-
-        return test_results
-
-    except Exception as e:
-        st.error(f"An error occurred during testing: {str(e)}")
-        return None
-
-# Add the "Run Test" button below the "Generate Predictions" button in the sidebar
 if st.sidebar.button("Run Test"):
     with st.spinner("Running tests..."):
-        test_results = run_test()
+        test_results = run_all_tests()
     
     if test_results:
         st.subheader("Test Results Summary")
         for vessel_type, vessel_results in test_results.items():
             st.write(f"Vessel Type: {vessel_type}")
-            for model_type, condition_results in vessel_results.items():
+            for model_type, results_df in vessel_results.items():
                 st.write(f"Model: {model_type}")
-                for condition, results_df in condition_results.items():
-                    st.write(f"{condition} Condition:")
-                    st.dataframe(results_df.style.format("{:.2f}"))
-                    st.write("Mean values:")
-                    st.write(results_df.mean().to_frame().T.style.format("{:.2f}"))
+                st.dataframe(results_df.style.format("{:.2f}"))
+                st.write("Mean values:")
+                st.write(results_df.mean().to_frame().T.style.format("{:.2f}"))
                 st.write("---")
     else:
         st.error("No test results were returned. Please check the logs for more information.")
