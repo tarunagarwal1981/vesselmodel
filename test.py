@@ -40,7 +40,11 @@ def get_hull_data(engine, vessel_type, limit=10):
 
 def get_performance_data(engine, imos):
     try:
-        imos = [int(imo) for imo in imos]
+        imos = [int(imo) for imo in imos if pd.notna(imo)]
+        if not imos:
+            logging.warning("No valid IMOs provided for performance data query.")
+            return pd.DataFrame()
+        
         query = """
         SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
         FROM vessel_performance_model_data
@@ -69,6 +73,10 @@ def separate_data(df):
 
 def train_model(X, y, model_type):
     try:
+        if X.empty or y.empty:
+            logging.warning("Empty data provided for model training.")
+            return None, None
+        
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -91,6 +99,9 @@ def train_model(X, y, model_type):
 
 def predict_performance(model, scaler, input_data, model_type):
     try:
+        if model is None or scaler is None:
+            return np.array([])
+        
         input_scaled = scaler.transform(input_data)
         if model_type == "Linear Regression with Polynomial Features":
             poly = PolynomialFeatures(degree=2)
@@ -125,19 +136,23 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
             return None
         
         combined_data = pd.merge(test_vessels, performance_data, left_on='imo', right_on='vessel_imo')
+        if combined_data.empty:
+            logging.warning(f"No matching data found after merging for {vessel_type}")
+            return None
+        
         ballast_df, laden_df = separate_data(combined_data)
         
-        if ballast_df.empty or laden_df.empty:
+        if ballast_df.empty and laden_df.empty:
             logging.warning(f"Insufficient data after separation for {vessel_type}")
             return None
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
         models = {
-            'ballast_power': train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type),
-            'ballast_consumption': train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type),
-            'laden_power': train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type),
-            'laden_consumption': train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
+            'ballast_power': train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type) if not ballast_df.empty else (None, None),
+            'ballast_consumption': train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type) if not ballast_df.empty else (None, None),
+            'laden_power': train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type) if not laden_df.empty else (None, None),
+            'laden_consumption': train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type) if not laden_df.empty else (None, None)
         }
         
         results = {key: [] for key in models.keys()}
@@ -166,10 +181,10 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
         
         results_df = pd.DataFrame({
             'Speed (kts)': range(8, 16),
-            'Ballast Power % Diff': [np.mean(results['ballast_power'][i:i+10]) for i in range(0, len(results['ballast_power']), 10)],
-            'Ballast Consumption % Diff': [np.mean(results['ballast_consumption'][i:i+10]) for i in range(0, len(results['ballast_consumption']), 10)],
-            'Laden Power % Diff': [np.mean(results['laden_power'][i:i+10]) for i in range(0, len(results['laden_power']), 10)],
-            'Laden Consumption % Diff': [np.mean(results['laden_consumption'][i:i+10]) for i in range(0, len(results['laden_consumption']), 10)]
+            'Ballast Power % Diff': [np.mean(results['ballast_power'][i:i+10]) if results['ballast_power'] else np.nan for i in range(0, 80, 10)],
+            'Ballast Consumption % Diff': [np.mean(results['ballast_consumption'][i:i+10]) if results['ballast_consumption'] else np.nan for i in range(0, 80, 10)],
+            'Laden Power % Diff': [np.mean(results['laden_power'][i:i+10]) if results['laden_power'] else np.nan for i in range(0, 80, 10)],
+            'Laden Consumption % Diff': [np.mean(results['laden_consumption'][i:i+10]) if results['laden_consumption'] else np.nan for i in range(0, 80, 10)]
         }).set_index('Speed (kts)')
         
         return results_df
