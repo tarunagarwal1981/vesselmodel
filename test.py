@@ -169,10 +169,12 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
                 
                 for key, (model, scaler) in models.items():
                     if model is None or scaler is None:
+                        results[key].append(np.nan)
                         continue
                     
                     prediction = predict_performance(model, scaler, input_data, model_type)
                     if prediction.size == 0:
+                        results[key].append(np.nan)
                         continue
                     
                     df = ballast_df if 'ballast' in key else laden_df
@@ -182,24 +184,34 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
                         actual_value = actual['me_power_kw'].values[0] if 'power' in key else actual['me_consumption_mt'].values[0]
                         diff = calculate_percentage_difference(actual_value, prediction[0])
                         results[key].append(diff)
+                    else:
+                        results[key].append(np.nan)
         
         # Ensure all lists in results have the same length
         max_length = max(len(v) for v in results.values())
         results = {k: v + [np.nan] * (max_length - len(v)) for k, v in results.items()}
         
-        results_df = pd.DataFrame({
-            'Speed (kts)': range(8, 16),
-            'Ballast Power % Diff': [np.nanmean(results['ballast_power'][i:i+10]) for i in range(0, len(results['ballast_power']), 10)],
-            'Ballast Consumption % Diff': [np.nanmean(results['ballast_consumption'][i:i+10]) for i in range(0, len(results['ballast_consumption']), 10)],
-            'Laden Power % Diff': [np.nanmean(results['laden_power'][i:i+10]) for i in range(0, len(results['laden_power']), 10)],
-            'Laden Consumption % Diff': [np.nanmean(results['laden_consumption'][i:i+10]) for i in range(0, len(results['laden_consumption']), 10)]
-        }).set_index('Speed (kts)')
+        # Calculate averages for each speed
+        speed_results = {
+            'Speed (kts)': list(range(8, 16)),
+            'Ballast Power % Diff': [],
+            'Ballast Consumption % Diff': [],
+            'Laden Power % Diff': [],
+            'Laden Consumption % Diff': []
+        }
+        
+        for i in range(0, max_length, 10):
+            for key in results.keys():
+                avg = np.nanmean(results[key][i:i+10])
+                speed_results[key.replace('_', ' ').title() + ' % Diff'].append(avg)
+        
+        results_df = pd.DataFrame(speed_results).set_index('Speed (kts)')
         
         return results_df
     except Exception as e:
         logging.error(f"Error in run_test_for_vessel_type for {vessel_type} and {model_type}: {str(e)}")
         return None
-
+        
 def run_test():
     try:
         engine = get_db_connection()
