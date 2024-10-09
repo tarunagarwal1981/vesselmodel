@@ -51,10 +51,9 @@ def get_hull_data(engine, vessel_type):
 
 def get_performance_data(engine, imos):
     try:
-        # Convert numpy.int64 to regular Python int
         imos = [int(imo) for imo in imos]
         query = """
-        SELECT speed_kts, me_consumption_mt, me_power_kw, loading_condition, vessel_imo
+        SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo
         FROM vessel_performance_model_data
         WHERE vessel_imo IN %(imos)s
         """
@@ -71,16 +70,11 @@ def get_performance_data(engine, imos):
 
 def separate_data(df):
     try:
-        if 'loading_condition' in df.columns:
-            ballast = df[df['loading_condition'] == 'Ballast']
-            laden = df[(df['loading_condition'] == 'Scantling') | (df['loading_condition'] == 'Design')]
-            laden = laden.drop_duplicates(subset=['vessel_imo'], keep='first')
-        else:
-            # If loading_condition is not available, we'll use a simple split
-            df_sorted = df.sort_values('deadweight')
-            split_index = len(df) // 2
-            ballast = df_sorted.iloc[:split_index]
-            laden = df_sorted.iloc[split_index:]
+        # Since we don't have loading_condition, we'll use a simple split based on deadweight
+        df_sorted = df.sort_values('deadweight')
+        split_index = len(df) // 2
+        ballast = df_sorted.iloc[:split_index]
+        laden = df_sorted.iloc[split_index:]
         
         st.write(f"Debug - Ballast DataFrame shape: {ballast.shape}")
         st.write(f"Debug - Laden DataFrame shape: {laden.shape}")
