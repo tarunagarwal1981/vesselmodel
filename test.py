@@ -103,7 +103,7 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
         'laden_power': [], 'laden_consumption': []
     }
     
-    # Generate predictions and calculate differences
+    ## Generate predictions and calculate differences
     for speed in range(8, 16):
         ballast_power_diff = []
         ballast_consumption_diff = []
@@ -152,25 +152,36 @@ def run_test_for_vessel_type(engine, vessel_type, model_type):
     
     return results_df
 
-def main():
-    st.title("Vessel Performance Prediction Model Testing")
-
+def run_test():
     try:
         engine = get_db_connection()
         
+        all_results = {}
+        
         for vessel_type in vessel_types:
-            st.header(f"Results for {vessel_type}")
+            vessel_results = {}
             
             for model_type in model_options:
-                st.subheader(f"Model: {model_type}")
-                
                 results_df = run_test_for_vessel_type(engine, vessel_type, model_type)
-                st.dataframe(results_df.style.format("{:.2f}"))
-                
-                st.write("---")
+                vessel_results[model_type] = results_df
+            
+            all_results[vessel_type] = vessel_results
+        
+        return all_results
 
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+        st.error(f"An error occurred during testing: {str(e)}")
+        return None
 
 if __name__ == "__main__":
-    main()
+    st.title("Vessel Performance Prediction Model Testing")
+    test_results = run_test()
+    
+    if test_results:
+        for vessel_type, vessel_results in test_results.items():
+            st.header(f"Results for {vessel_type}")
+            
+            for model_type, results_df in vessel_results.items():
+                st.subheader(f"Model: {model_type}")
+                st.dataframe(results_df.style.format("{:.2f}"))
+                st.write("---")
