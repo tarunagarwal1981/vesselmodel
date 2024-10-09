@@ -38,7 +38,7 @@ def get_hull_data(engine, vessel_type):
 def get_performance_data(engine, imos):
     imos = [int(imo) for imo in imos]
     query = """
-    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo
+    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
     WHERE vessel_imo IN %(imos)s
     """
@@ -46,9 +46,16 @@ def get_performance_data(engine, imos):
     return df.dropna()
 
 def separate_data(df):
-    df_sorted = df.sort_values('deadweight')
-    split_index = len(df) // 2
-    return df_sorted.iloc[:split_index], df_sorted.iloc[split_index:]
+    ballast_df = df[df['load_type'] == 'Ballast']
+    laden_df = df[df['load_type'].isin(['Scantling', 'Design'])]
+    
+    # If 'Scantling' is available, use it; otherwise, use 'Design'
+    if 'Scantling' in laden_df['load_type'].values:
+        laden_df = laden_df[laden_df['load_type'] == 'Scantling']
+    else:
+        laden_df = laden_df[laden_df['load_type'] == 'Design']
+    
+    return ballast_df, laden_df
 
 def train_model(X, y, model_type):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -84,8 +91,11 @@ if st.sidebar.button("Generate Predictions"):
         engine = get_db_connection()
         hull_data = get_hull_data(engine, vessel_type)
         performance_data = get_performance_data(engine, hull_data['imo'].unique())
+        
+        # Merge hull data with performance data
         combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo').dropna()
         
+        # Separate data into ballast and laden conditions
         ballast_df, laden_df = separate_data(combined_data)
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
