@@ -118,11 +118,22 @@ def run_test():
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
+        # Check for non-finite values in training data
+        for df in [ballast_df, laden_df]:
+            for col in input_columns + ['me_power_kw', 'me_consumption_mt']:
+                if not np.isfinite(df[col]).all():
+                    st.error(f"Non-finite values found in {col} column of {'ballast' if df is ballast_df else 'laden'} data.")
+                    return
+        
         # Train models
-        ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
-        ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
-        laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
-        laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
+        try:
+            ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], model_type)
+            ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], model_type)
+            laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], model_type)
+            laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'], model_type)
+        except Exception as e:
+            st.error(f"Error during model training: {str(e)}")
+            return
         
         results = []
         
@@ -133,13 +144,22 @@ def run_test():
             for speed in range(8, 16):
                 input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], vessel['deadweight'], vessel['mcr'], speed]], columns=input_columns)
                 
-                # Ballast predictions
-                predicted_ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data, model_type)
-                predicted_ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, model_type)
+                # Check for non-finite values in input data
+                if not np.isfinite(input_data).all().all():
+                    st.warning(f"Non-finite values found in input data for vessel {vessel['vessel_name']} at speed {speed}. Skipping this prediction.")
+                    continue
                 
-                # Laden predictions
-                predicted_laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data, model_type)
-                predicted_laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, model_type)
+                try:
+                    # Ballast predictions
+                    predicted_ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data, model_type)
+                    predicted_ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data, model_type)
+                    
+                    # Laden predictions
+                    predicted_laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data, model_type)
+                    predicted_laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data, model_type)
+                except Exception as e:
+                    st.warning(f"Error during prediction for vessel {vessel['vessel_name']} at speed {speed}: {str(e)}")
+                    continue
                 
                 # Actual values (if available)
                 actual_ballast = ballast_perf[ballast_perf['speed_kts'].round() == speed]
@@ -160,6 +180,10 @@ def run_test():
                         'Power_Diff': calculate_percentage_difference(actual_laden['me_power_kw'].values[0], predicted_laden_power),
                         'Consumption_Diff': calculate_percentage_difference(actual_laden['me_consumption_mt'].values[0], predicted_laden_consumption)
                     })
+        
+        if not results:
+            st.warning("No valid results were generated. Please check the input data.")
+            return
         
         results_df = pd.DataFrame(results)
         all_results[model_type] = results_df
@@ -230,8 +254,9 @@ with col1:
 with col2:
     if st.button("Run Test"):
         test_results = run_test()
-        st.subheader("Test Results Summary")
-        for model, results in test_results.items():
-            st.write(f"Model: {model}")
-            st.write(results.groupby(['Speed', 'Condition']).mean().reset_index())
-            st.write("---")
+        if test_results:
+            st.subheader("Test Results Summary")
+            for model, results in test_results.items():
+                st.write(f"Model: {model}")
+                st.write(results.groupby(['Speed', 'Condition']).mean().reset_index())
+                st.write("---")
