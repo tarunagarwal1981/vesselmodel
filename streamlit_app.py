@@ -28,7 +28,7 @@ selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 def get_hull_data(engine, vessel_type):
     query = """
     SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
-           depth, deadweight, me_1_mcr_kw as mcr, imo
+           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
@@ -97,6 +97,18 @@ if st.sidebar.button("Generate Predictions"):
         
         # Separate data into ballast and laden conditions
         ballast_df, laden_df = separate_data(combined_data)
+        
+        # Display the separated datasets
+        st.subheader("Separated Datasets")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("Ballast Condition Data")
+            st.dataframe(ballast_df[['imo', 'vessel_name', 'lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts', 'me_power_kw', 'me_consumption_mt']])
+        
+        with col2:
+            st.write("Laden Condition Data")
+            st.dataframe(laden_df[['imo', 'vessel_name', 'lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts', 'me_power_kw', 'me_consumption_mt']])
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
