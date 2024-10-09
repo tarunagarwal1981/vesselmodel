@@ -1,14 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
 import sqlalchemy
 
@@ -21,9 +16,7 @@ def get_db_connection():
         return None
 
 # Sidebar for model selection and vessel details
-st.sidebar.header("Model Selection and Vessel Details")
-model_options = ["Linear Regression with Polynomial Features", "Random Forest", "MLP Regressor"]
-selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
+st.sidebar.header("Vessel Details")
 
 # User Inputs for Vessel Particulars
 lpp = st.sidebar.number_input("Lpp (m)", min_value=50.0, max_value=400.0, step=0.1)
@@ -45,6 +38,7 @@ def get_hull_data(engine, vessel_type):
         st.write(f"Debug - vessel_type: {vessel_type}")
         
         df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+        df = df.dropna()  # Remove rows with any null values
         st.write(f"Debug - DataFrame columns: {df.columns}")
         st.write(f"Debug - DataFrame shape: {df.shape}")
         return df
@@ -64,6 +58,7 @@ def get_performance_data(engine, imos):
         st.write(f"Debug - Number of IMOs: {len(imos)}")
         
         df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
+        df = df.dropna()  # Remove rows with any null values
         st.write(f"Debug - Performance DataFrame columns: {df.columns}")
         st.write(f"Debug - Performance DataFrame shape: {df.shape}")
         return df
@@ -85,48 +80,27 @@ def separate_data(df):
         st.error(f"Error in separate_data: {str(e)}")
         return pd.DataFrame(), pd.DataFrame()
 
-def preprocess_data(X, y):
-    # Create a ColumnTransformer for preprocessing
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', SimpleImputer(strategy='mean'), X.columns)
-        ])
-    
-    # Create a pipeline that includes the preprocessor and the model
-    if selected_model == "Linear Regression with Polynomial Features":
-        model = Pipeline([
-            ('preprocessor', preprocessor),
-            ('poly', PolynomialFeatures(degree=2)),
-            ('regressor', LinearRegression())
-        ])
-    elif selected_model == "Random Forest":
-        model = Pipeline([
-            ('preprocessor', preprocessor),
-            ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
-        ])
-    else:  # MLP Regressor
-        model = Pipeline([
-            ('preprocessor', preprocessor),
-            ('regressor', MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=500, random_state=42))
-        ])
-    
-    return model, X, y
-
 def train_model(X, y):
     try:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
-        model, X_train, y_train = preprocess_data(X_train, y_train)
-        model.fit(X_train, y_train)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
         
-        return model
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train_scaled, y_train)
+        
+        return model, scaler
     except Exception as e:
         st.error(f"Error in train_model: {str(e)}")
-        return None
+        return None, None
 
-def predict_performance(model, input_data):
+def predict_performance(model, scaler, input_data):
     try:
-        return model.predict(input_data)
+        input_scaled = scaler.transform(input_data)
+        prediction = model.predict(input_scaled)
+        return max(0, prediction[0])  # Ensure non-negative predictions
     except Exception as e:
         st.error(f"Error in predict_performance: {str(e)}")
         return None
@@ -154,6 +128,7 @@ if st.sidebar.button("Fetch Data and Train Model"):
                 else:
                     # Combine hull and performance data
                     combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo')
+                    combined_data = combined_data.dropna()  # Remove any rows with null values after merging
                     
                     # Separate data
                     ballast_df, laden_df = separate_data(combined_data)
@@ -164,11 +139,11 @@ if st.sidebar.button("Fetch Data and Train Model"):
                     # Train models
                     input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
                     
-                    ballast_power_model = train_model(ballast_df[input_columns], ballast_df['me_power_kw'])
-                    ballast_consumption_model = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'])
+                    ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'])
+                    ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'])
                     
-                    laden_power_model = train_model(laden_df[input_columns], laden_df['me_power_kw'])
-                    laden_consumption_model = train_model(laden_df[input_columns], laden_df['me_consumption_mt'])
+                    laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'])
+                    laden_consumption_model, laden_consumption_scaler = train_model(laden_df[input_columns], laden_df['me_consumption_mt'])
                     
                     if all([ballast_power_model, ballast_consumption_model, laden_power_model, laden_consumption_model]):
                         # Generate predictions
@@ -184,24 +159,24 @@ if st.sidebar.button("Fetch Data and Train Model"):
                             input_data = pd.DataFrame([[lpp, breadth, depth, deadweight, mcr, speed]], 
                                                       columns=input_columns)
                             
-                            ballast_power = predict_performance(ballast_power_model, input_data)
-                            ballast_consumption = predict_performance(ballast_consumption_model, input_data)
+                            ballast_power = predict_performance(ballast_power_model, ballast_power_scaler, input_data)
+                            ballast_consumption = predict_performance(ballast_consumption_model, ballast_consumption_scaler, input_data)
                             
-                            laden_power = predict_performance(laden_power_model, input_data)
-                            laden_consumption = predict_performance(laden_consumption_model, input_data)
+                            laden_power = predict_performance(laden_power_model, laden_power_scaler, input_data)
+                            laden_consumption = predict_performance(laden_consumption_model, laden_consumption_scaler, input_data)
                             
                             if all([ballast_power is not None, ballast_consumption is not None, 
                                     laden_power is not None, laden_consumption is not None]):
                                 ballast_predictions.append({
                                     'Speed (kts)': speed,
-                                    'Power (kW)': round(ballast_power[0], 2),
-                                    'Consumption (mt/day)': round(ballast_consumption[0], 2)
+                                    'Power (kW)': round(ballast_power, 2),
+                                    'Consumption (mt/day)': round(ballast_consumption, 2)
                                 })
                                 
                                 laden_predictions.append({
                                     'Speed (kts)': speed,
-                                    'Power (kW)': round(laden_power[0], 2),
-                                    'Consumption (mt/day)': round(laden_consumption[0], 2)
+                                    'Power (kW)': round(laden_power, 2),
+                                    'Consumption (mt/day)': round(laden_consumption, 2)
                                 })
                         
                         # Display results
