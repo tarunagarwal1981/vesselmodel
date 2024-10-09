@@ -161,21 +161,17 @@ if st.sidebar.button("Generate Predictions"):
 # Add the "Run Test" button below the "Generate Predictions" button in the sidebar
 if st.sidebar.button("Run Test"):
     with st.spinner("Running tests..."):
-        test_results = run_test()
+        test_results = run_all_tests()
     
     if test_results:
         st.subheader("Test Results Summary")
         for vessel_type, vessel_results in test_results.items():
             st.write(f"Vessel Type: {vessel_type}")
-            for model_type, model_results in vessel_results.items():
+            for model_type, results_df in vessel_results.items():
                 st.write(f"Model: {model_type}")
-                if isinstance(model_results, pd.DataFrame) and not model_results.empty:
-                    st.dataframe(model_results.style.format("{:.2f}"))
-                    st.write("Mean values:")
-                    mean_values = model_results.mean().to_frame().T
-                    st.dataframe(mean_values.style.format("{:.2f}"))
-                else:
-                    st.write("No valid results for this model.")
+                st.dataframe(results_df.style.format("{:.2f}"))
+                st.write("Mean values:")
+                st.write(results_df.mean().to_frame().T.style.format("{:.2f}"))
                 st.write("---")
     else:
         st.error("No test results were returned. Please check the logs for more information.")
