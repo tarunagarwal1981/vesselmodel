@@ -8,6 +8,7 @@ from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.model_selection import train_test_split
 from database import get_db_engine
 import sqlalchemy
+from sqlalchemy.sql import text
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -21,13 +22,15 @@ def get_db_connection():
         raise
 
 def get_hull_data(engine, vessel_type):
-    query = """
+    query = text("""
     SELECT lpp, breadth, depth, deadweight, me_1_mcr_kw as mcr, load_type, imo
     FROM hull_particulars
     WHERE vessel_type = :vessel_type
-    """
+    """)
     try:
-        return pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+        with engine.connect() as conn:
+            result = conn.execute(query, {"vessel_type": vessel_type})
+            return pd.DataFrame(result.fetchall(), columns=result.keys())
     except sqlalchemy.exc.ProgrammingError as e:
         logger.error(f"SQL error in get_hull_data: {str(e)}")
         raise
@@ -36,13 +39,15 @@ def get_hull_data(engine, vessel_type):
         raise
 
 def get_performance_data(engine, imos):
-    query = """
+    query = text("""
     SELECT speed_kts, me_consumption_mt, me_power_kw, load_type, vessel_imo
     FROM vessel_performance_model_data
     WHERE vessel_imo IN :imos
-    """
+    """)
     try:
-        return pd.read_sql(query, engine, params={'imos': tuple(imos)})
+        with engine.connect() as conn:
+            result = conn.execute(query, {"imos": tuple(imos)})
+            return pd.DataFrame(result.fetchall(), columns=result.keys())
     except sqlalchemy.exc.ProgrammingError as e:
         logger.error(f"SQL error in get_performance_data: {str(e)}")
         raise
