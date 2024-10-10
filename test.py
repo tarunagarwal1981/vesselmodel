@@ -5,6 +5,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.model_selection import train_test_split
 from database import get_db_engine
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_db_connection():
     return get_db_engine()
@@ -16,25 +20,31 @@ def get_hull_data(engine, vessel_type):
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
-    return pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+    df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+    return remove_null_rows(df, "hull_data")
 
 def get_performance_data(engine, imos):
-    # Convert IMO numbers to strings and join them for the IN clause
     imos_string = ", ".join(f"'{str(imo)}'" for imo in imos)
     query = f"""
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
     WHERE vessel_imo::text IN ({imos_string})
     """
-    return pd.read_sql(query, engine)
+    df = pd.read_sql(query, engine)
+    return remove_null_rows(df, "performance_data")
 
-# The rest of the script remains the same
+def remove_null_rows(df, df_name):
+    initial_rows = len(df)
+    df_cleaned = df.dropna()
+    removed_rows = initial_rows - len(df_cleaned)
+    logging.info(f"{df_name}: Removed {removed_rows} rows with null values. {len(df_cleaned)} rows remaining.")
+    return df_cleaned
 
 def separate_data(df):
     ballast_df = df[df['load_type'] == 'Ballast']
     laden_df = df[df['load_type'].isin(['Scantling', 'Design'])]
     laden_df = laden_df[laden_df['load_type'] == 'Scantling'] if 'Scantling' in laden_df['load_type'].values else laden_df
-    return ballast_df, laden_df
+    return remove_null_rows(ballast_df, "ballast_data"), remove_null_rows(laden_df, "laden_data")
 
 def train_model(X, y, model_type):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -71,16 +81,20 @@ def run_all_tests():
     all_results = {}
 
     for vessel_type in vessel_types:
+        logging.info(f"Processing {vessel_type}")
         hull_data = get_hull_data(engine, vessel_type)
         performance_data = get_performance_data(engine, hull_data['imo'].unique())
         
         combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo')
+        combined_data = remove_null_rows(combined_data, "combined_data")
+        
         ballast_df, laden_df = separate_data(combined_data)
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
         vessel_results = {}
         for model_type in model_types:
+            logging.info(f"Training {model_type} model")
             models = {}
             for condition in ['ballast', 'laden']:
                 df = ballast_df if condition == 'ballast' else laden_df
@@ -89,8 +103,8 @@ def run_all_tests():
                     model, scaler = train_model(df[input_columns], y, model_type)
                     models[f"{condition}_{target}"] = (model, scaler)
             
-            # Test on 10 random vessels
-            test_vessels = hull_data.sample(n=10)
+            # Test on 10 random vessels or all vessels if less than 10
+            test_vessels = hull_data.sample(n=min(10, len(hull_data)))
             speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
             
             results = []
@@ -146,7 +160,7 @@ def run_all_tests():
 if __name__ == "__main__":
     results = run_all_tests()
     for vessel_type, models in results.items():
-        print(f"\nResults for {vessel_type}")
+        logging.info(f"\nResults for {vessel_type}")
         for model_type, df in models.items():
-            print(f"\n{model_type}:")
-            print(df)
+            logging.info(f"\n{model_type}:")
+            logging.info(df)
