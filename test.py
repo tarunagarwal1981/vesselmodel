@@ -19,14 +19,14 @@ def get_hull_data(engine, vessel_type):
     return pd.read_sql(query, engine, params={'vessel_type': vessel_type})
 
 def get_performance_data(engine, imos):
-    # Convert IMO numbers to strings and create a tuple
-    imos_tuple = tuple(str(imo) for imo in imos)
-    query = """
+    # Convert IMO numbers to strings and join them for the IN clause
+    imos_string = ", ".join(f"'{str(imo)}'" for imo in imos)
+    query = f"""
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
-    WHERE vessel_imo::text IN %(imos)s
+    WHERE vessel_imo::text IN ({imos_string})
     """
-    return pd.read_sql(query, engine, params={'imos': imos_tuple})
+    return pd.read_sql(query, engine)
 
 # The rest of the script remains the same
 
@@ -133,7 +133,7 @@ def run_all_tests():
                     'Ballast Power % Diff from Actual': np.mean(ballast_power_diffs) if ballast_power_diffs else np.nan,
                     'Ballast Consumption % Diff from Actual': np.mean(ballast_consumption_diffs) if ballast_consumption_diffs else np.nan,
                     'Laden Power % Diff from Actual': np.mean(laden_power_diffs) if laden_power_diffs else np.nan,
-    'Laden Consumption % Diff from Actual': np.mean(laden_consumption_diffs) if laden_consumption_diffs else np.nan
+                    'Laden Consumption % Diff from Actual': np.mean(laden_consumption_diffs) if laden_consumption_diffs else np.nan
                 })
             
             df_results = pd.DataFrame(results).set_index('Speed (kts)')
