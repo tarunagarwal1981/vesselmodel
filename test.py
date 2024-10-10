@@ -70,7 +70,12 @@ def calculate_percentage_difference(actual, predicted):
 def run_all_tests():
     engine = get_db_connection()
     vessel_types = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
-    model_types = ["Linear Regression with Polynomial Features", "Random Forest", "SVR", "Neural Network"]
+    model_types = [
+        "Linear Regression with Polynomial Features",
+        "Random Forest",
+        "SVR",
+        "Neural Network"
+    ]
     all_results = {}
 
     for vessel_type in vessel_types:
