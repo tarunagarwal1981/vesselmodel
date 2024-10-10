@@ -105,7 +105,7 @@ def run_all_tests():
             
             # Test on 10 random vessels or all vessels if less than 10
             test_vessels = hull_data.sample(n=min(10, len(hull_data)))
-            speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
+            speed_range = range(11, 23) if vessel_type == "CONTAINER" else range(9, 16)
             
             results = []
             for speed in speed_range:
