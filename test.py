@@ -19,14 +19,17 @@ def get_hull_data(engine, vessel_type):
     return pd.read_sql(query, engine, params={'vessel_type': vessel_type})
 
 def get_performance_data(engine, imos):
-    # Convert numpy.int64 to Python int
-    imos = [int(imo) for imo in imos]
-    query = """
+    # Convert IMO numbers to strings
+    imos = [str(imo) for imo in imos]
+    placeholders = ','.join(['%s'] * len(imos))
+    query = f"""
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
-    WHERE vessel_imo IN %(imos)s
+    WHERE vessel_imo::text IN ({placeholders})
     """
-    return pd.read_sql(query, engine, params={'imos': tuple(imos)})
+    return pd.read_sql(query, engine, params=imos)
+
+# The rest of the script remains the same
 
 def separate_data(df):
     ballast_df = df[df['load_type'] == 'Ballast']
