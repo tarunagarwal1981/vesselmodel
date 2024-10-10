@@ -19,6 +19,8 @@ def get_hull_data(engine, vessel_type):
     return pd.read_sql(query, engine, params={'vessel_type': vessel_type})
 
 def get_performance_data(engine, imos):
+    # Convert numpy.int64 to Python int
+    imos = [int(imo) for imo in imos]
     query = """
     SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
