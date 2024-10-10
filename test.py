@@ -2,18 +2,16 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from database import get_db_engine
-import sqlalchemy
 
 def get_db_connection():
     return get_db_engine()
 
 def get_hull_data(engine, vessel_type):
     query = """
-    SELECT lpp, breadth, depth, deadweight, mcr, load_type, imo
+    SELECT lpp, breadth, depth, deadweight, me_1_mcr_kw as mcr, load_type, imo
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
@@ -30,10 +28,7 @@ def get_performance_data(engine, imos):
 def separate_data(df):
     ballast_df = df[df['load_type'] == 'Ballast']
     laden_df = df[df['load_type'].isin(['Scantling', 'Design'])]
-    if 'Scantling' in laden_df['load_type'].values:
-        laden_df = laden_df[laden_df['load_type'] == 'Scantling']
-    else:
-        laden_df = laden_df[laden_df['load_type'] == 'Design']
+    laden_df = laden_df[laden_df['load_type'] == 'Scantling'] if 'Scantling' in laden_df['load_type'].values else laden_df
     return ballast_df, laden_df
 
 def train_model(X, y, model_type):
@@ -41,12 +36,12 @@ def train_model(X, y, model_type):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     
-    if model_type == "Linear":
+    if model_type == "Linear Regression with Polynomial Features":
         poly = PolynomialFeatures(degree=2)
         X_poly = poly.fit_transform(X_train_scaled)
         model = LinearRegression()
         model.fit(X_poly, y_train)
-    elif model_type == "RandomForest":
+    elif model_type == "Random Forest":
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train_scaled, y_train)
     
@@ -54,7 +49,7 @@ def train_model(X, y, model_type):
 
 def predict(model, scaler, X, model_type):
     X_scaled = scaler.transform(X)
-    if model_type == "Linear":
+    if model_type == "Linear Regression with Polynomial Features":
         poly = PolynomialFeatures(degree=2)
         X_poly = poly.fit_transform(X_scaled)
         return model.predict(X_poly)
@@ -64,10 +59,11 @@ def predict(model, scaler, X, model_type):
 def calculate_percentage_difference(actual, predicted):
     return np.abs((actual - predicted) / actual) * 100
 
-def run_tests():
+def run_all_tests():
     engine = get_db_connection()
     vessel_types = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
-    results = {}
+    model_types = ["Linear Regression with Polynomial Features", "Random Forest"]
+    all_results = {}
 
     for vessel_type in vessel_types:
         hull_data = get_hull_data(engine, vessel_type)
@@ -78,67 +74,74 @@ def run_tests():
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
-        models = {}
-        for condition in ['ballast', 'laden']:
-            df = ballast_df if condition == 'ballast' else laden_df
-            for target in ['power', 'consumption']:
-                y = df['me_power_kw'] if target == 'power' else df['me_consumption_mt']
-                for model_type in ['Linear', 'RandomForest']:
+        vessel_results = {}
+        for model_type in model_types:
+            models = {}
+            for condition in ['ballast', 'laden']:
+                df = ballast_df if condition == 'ballast' else laden_df
+                for target in ['power', 'consumption']:
+                    y = df['me_power_kw'] if target == 'power' else df['me_consumption_mt']
                     model, scaler = train_model(df[input_columns], y, model_type)
-                    models[f"{condition}_{target}_{model_type}"] = (model, scaler)
-        
-        # Test on 10 random vessels
-        test_vessels = hull_data.sample(n=10)
-        speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
-        
-        vessel_results = {model: {speed: {'power': [], 'consumption': []} for speed in speed_range} 
-                          for model in ['Linear', 'RandomForest']}
-        
-        for _, vessel in test_vessels.iterrows():
+                    models[f"{condition}_{target}"] = (model, scaler)
+            
+            # Test on 10 random vessels
+            test_vessels = hull_data.sample(n=10)
+            speed_range = range(10, 23) if vessel_type == "CONTAINER" else range(8, 16)
+            
+            results = []
             for speed in speed_range:
-                input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], 
-                                            vessel['deadweight'], vessel['mcr'], speed]], 
-                                          columns=input_columns)
+                ballast_power_diffs = []
+                ballast_consumption_diffs = []
+                laden_power_diffs = []
+                laden_consumption_diffs = []
                 
-                actual_ballast = ballast_df[(ballast_df['imo'] == vessel['imo']) & 
-                                            (ballast_df['speed_kts'].round() == speed)]
-                actual_laden = laden_df[(laden_df['imo'] == vessel['imo']) & 
-                                        (laden_df['speed_kts'].round() == speed)]
-                
-                for model_type in ['Linear', 'RandomForest']:
+                for _, vessel in test_vessels.iterrows():
+                    input_data = pd.DataFrame([[vessel['lpp'], vessel['breadth'], vessel['depth'], 
+                                                vessel['deadweight'], vessel['mcr'], speed]], 
+                                              columns=input_columns)
+                    
                     for condition in ['ballast', 'laden']:
-                        actual = actual_ballast if condition == 'ballast' else actual_laden
+                        actual = ballast_df if condition == 'ballast' else laden_df
+                        actual = actual[(actual['imo'] == vessel['imo']) & 
+                                        (actual['speed_kts'].round() == speed)]
+                        
                         if not actual.empty:
                             for target in ['power', 'consumption']:
-                                model, scaler = models[f"{condition}_{target}_{model_type}"]
+                                model, scaler = models[f"{condition}_{target}"]
                                 predicted = predict(model, scaler, input_data, model_type)[0]
                                 actual_value = actual['me_power_kw'].values[0] if target == 'power' else actual['me_consumption_mt'].values[0]
                                 diff = calculate_percentage_difference(actual_value, predicted)
-                                vessel_results[model_type][speed][target].append(diff)
+                                
+                                if condition == 'ballast':
+                                    if target == 'power':
+                                        ballast_power_diffs.append(diff)
+                                    else:
+                                        ballast_consumption_diffs.append(diff)
+                                else:
+                                    if target == 'power':
+                                        laden_power_diffs.append(diff)
+                                    else:
+                                        laden_consumption_diffs.append(diff)
+                
+                results.append({
+                    'Speed (kts)': speed,
+                    'Ballast Power % Diff from Actual': np.mean(ballast_power_diffs) if ballast_power_diffs else np.nan,
+                    'Ballast Consumption % Diff from Actual': np.mean(ballast_consumption_diffs) if ballast_consumption_diffs else np.nan,
+                    'Laden Power % Diff from Actual': np.mean(laden_power_diffs) if laden_power_diffs else np.nan,
+                    'Laden Consumption % Diff from Actual': np.mean(laden_consumption_diffs) if laden_consumption_diffs else np.nan
+                })
+            
+            df_results = pd.DataFrame(results).set_index('Speed (kts)')
+            vessel_results[model_type] = df_results
         
-        # Calculate average differences
-        for model_type in ['Linear', 'RandomForest']:
-            for speed in speed_range:
-                for target in ['power', 'consumption']:
-                    if vessel_results[model_type][speed][target]:
-                        vessel_results[model_type][speed][target] = np.mean(vessel_results[model_type][speed][target])
-                    else:
-                        vessel_results[model_type][speed][target] = np.nan
-        
-        results[vessel_type] = vessel_results
+        all_results[vessel_type] = vessel_results
 
-    return results
-
-def display_results(results):
-    for vessel_type, vessel_results in results.items():
-        print(f"\nResults for {vessel_type}")
-        for model_type in ['Linear', 'RandomForest']:
-            print(f"\n{model_type} Model:")
-            df = pd.DataFrame(vessel_results[model_type]).T
-            df.columns = ['Power % Diff', 'Consumption % Diff']
-            df.index.name = 'Speed (kts)'
-            print(df.to_string())
+    return all_results
 
 if __name__ == "__main__":
-    results = run_tests()
-    display_results(results)
+    results = run_all_tests()
+    for vessel_type, models in results.items():
+        print(f"\nResults for {vessel_type}")
+        for model_type, df in models.items():
+            print(f"\n{model_type}:")
+            print(df)
