@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.svm import SVR
+from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.model_selection import train_test_split
 from database import get_db_engine
@@ -44,6 +46,12 @@ def train_model(X, y, model_type):
     elif model_type == "Random Forest":
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train_scaled, y_train)
+    elif model_type == "SVR":
+        model = SVR(kernel='rbf', C=1.0, epsilon=0.1)
+        model.fit(X_train_scaled, y_train)
+    elif model_type == "Neural Network":
+        model = MLPRegressor(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42)
+        model.fit(X_train_scaled, y_train)
     
     return model, scaler
 
@@ -62,7 +70,7 @@ def calculate_percentage_difference(actual, predicted):
 def run_all_tests():
     engine = get_db_connection()
     vessel_types = ["BULK CARRIER", "CONTAINER", "OIL TANKER"]
-    model_types = ["Linear Regression with Polynomial Features", "Random Forest"]
+    model_types = ["Linear Regression with Polynomial Features", "Random Forest", "SVR", "Neural Network"]
     all_results = {}
 
     for vessel_type in vessel_types:
@@ -145,3 +153,4 @@ if __name__ == "__main__":
         for model_type, df in models.items():
             print(f"\n{model_type}:")
             print(df)
+            print(f"Mean % difference: {df.mean().mean():.2f}")
