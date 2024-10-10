@@ -11,7 +11,8 @@ def get_db_connection():
 
 def get_hull_data(engine, vessel_type):
     query = """
-    SELECT lpp, breadth, depth, deadweight, me_1_mcr_kw as mcr, load_type, imo
+    SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
+           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
@@ -19,7 +20,7 @@ def get_hull_data(engine, vessel_type):
 
 def get_performance_data(engine, imos):
     query = """
-    SELECT speed_kts, me_consumption_mt, me_power_kw, load_type, vessel_imo
+    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
     FROM vessel_performance_model_data
     WHERE vessel_imo IN %(imos)s
     """
