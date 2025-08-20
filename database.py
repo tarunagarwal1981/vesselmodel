@@ -4,10 +4,10 @@ from datetime import datetime, timedelta
 import urllib.parse
 
 DB_CONFIG = {
-    'host': 'aws-0-ap-south-1.pooler.supabase.com',
+    'host': 'aws-0-ap-southeast-1.pooler.supabase.com',
     'database': 'postgres',
-    'user': 'postgres.conrxbcvuogbzfysomov',
-    'password': 'wXAryCC8@iwNvj#',
+    'user': 'postgres.aegejyftralxyklrinyn',
+    'password': '5sSLogAzvsZquIoL',
     'port': '6543'
 }
 
