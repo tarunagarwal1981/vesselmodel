@@ -30,12 +30,30 @@ selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
 def get_hull_data(engine, vessel_type):
     query = """
-    SELECT Length_between_perpendiculars_m as lpp, Breadth_moduled_m as breadth, 
-           Depth, deadweight, ME_1_MCR_kW as mcr, imo, vessel_name
+    SELECT 
+        "Length_between_perpendiculars_m" as lpp, 
+        "Breadth_Moduled_m" as breadth, 
+        "Depth", 
+        deadweight, 
+        "ME_1_MCR_kW" as mcr, 
+        "IMO" as imo, 
+        "Vessel_Name" as vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
+    AND "Length_between_perpendiculars_m" IS NOT NULL
+    AND "Breadth_Moduled_m" IS NOT NULL
+    AND "Depth" IS NOT NULL
+    AND deadweight IS NOT NULL
+    AND "ME_1_MCR_kW" IS NOT NULL
+    AND "IMO" IS NOT NULL
     """
     df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+    
+    # Convert string columns to numeric where needed
+    for col in ['lpp', 'breadth', 'depth', 'mcr']:
+        if df[col].dtype == 'object':
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
     return df.dropna()
 
 def get_performance_data(engine, imos):
@@ -92,14 +110,42 @@ def predict_performance(model, scaler, input_data, model_type):
 if st.sidebar.button("Generate Predictions"):
     try:
         engine = get_db_connection()
+        
+        # Get hull data
+        st.write("Fetching hull data...")
         hull_data = get_hull_data(engine, vessel_type)
+        
+        if hull_data.empty:
+            st.error(f"No hull data found for vessel type: {vessel_type}")
+            st.stop()
+        
+        st.write(f"Found {len(hull_data)} vessels of type {vessel_type}")
+        
+        # Get performance data
+        st.write("Fetching performance data...")
         performance_data = get_performance_data(engine, hull_data['imo'].unique())
+        
+        if performance_data.empty:
+            st.error("No performance data found for the selected vessels")
+            st.stop()
         
         # Merge hull data with performance data
         combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo').dropna()
         
+        if combined_data.empty:
+            st.error("No matching data found between hull particulars and performance data")
+            st.stop()
+        
         # Separate data into ballast and laden conditions
         ballast_df, laden_df = separate_data(combined_data)
+        
+        if ballast_df.empty:
+            st.error("No ballast condition data found")
+            st.stop()
+            
+        if laden_df.empty:
+            st.error("No laden condition data found")
+            st.stop()
         
         # Display the separated datasets
         st.subheader("Separated Datasets")
@@ -115,6 +161,8 @@ if st.sidebar.button("Generate Predictions"):
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
+        # Train models
+        st.write("Training models...")
         ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], selected_model)
         ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], selected_model)
         laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], selected_model)
@@ -155,8 +203,13 @@ if st.sidebar.button("Generate Predictions"):
         with col2:
             st.write("Laden Condition")
             st.dataframe(pd.DataFrame(laden_predictions).set_index('Speed (kts)'))
+            
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
+        st.write("Error details for debugging:")
+        st.write(f"Error type: {type(e).__name__}")
+        import traceback
+        st.code(traceback.format_exc())
 
 # Add the "Run Test" button below the "Generate Predictions" button in the sidebar
 if st.sidebar.button("Run Test"):
