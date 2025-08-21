@@ -12,7 +12,14 @@ import sqlalchemy
 from test import run_all_tests
 
 def get_db_connection():
-    return get_db_engine()
+    engine = get_db_engine()
+    
+    # Configure engine with timeouts
+    if hasattr(engine, 'pool'):
+        engine.pool._timeout = 300  # 5 minutes
+        engine.pool._recycle = 3600  # 1 hour
+    
+    return engine
 
 st.set_page_config(page_title="Vessel Performance Prediction", layout="wide")
 
@@ -29,42 +36,111 @@ model_options = ["Linear Regression with Polynomial Features", "Random Forest", 
 selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
 def get_hull_data(engine, vessel_type):
-    query = """
-    SELECT 
-        "Length_between_perpendiculars_m" as lpp, 
-        "Breadth_Moduled_m" as breadth, 
-        "Depth", 
-        deadweight, 
-        "ME_1_MCR_kW" as mcr, 
-        "IMO" as imo, 
-        "Vessel_Name" as vessel_name
-    FROM hull_particulars
-    WHERE vessel_type = %(vessel_type)s
-    AND "Length_between_perpendiculars_m" IS NOT NULL
-    AND "Breadth_Moduled_m" IS NOT NULL
-    AND "Depth" IS NOT NULL
-    AND deadweight IS NOT NULL
-    AND "ME_1_MCR_kW" IS NOT NULL
-    AND "IMO" IS NOT NULL
-    """
-    df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
-    
-    # Convert string columns to numeric where needed
-    for col in ['lpp', 'breadth', 'depth', 'mcr']:
-        if df[col].dtype == 'object':
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    return df.dropna()
+    # First, try a simpler query to check if data exists
+    try:
+        # Simple count query first
+        count_query = "SELECT COUNT(*) FROM hull_particulars WHERE vessel_type = %(vessel_type)s"
+        with engine.connect() as conn:
+            # Set timeout for this session
+            conn.execute(sqlalchemy.text("SET statement_timeout = '60s'"))
+            result = conn.execute(sqlalchemy.text(count_query), {'vessel_type': vessel_type})
+            count = result.scalar()
+            st.write(f"Found {count} total records for {vessel_type}")
+        
+        if count == 0:
+            return pd.DataFrame()
+        
+        # If count is reasonable, proceed with full query
+        query = """
+        SELECT 
+            "Length_between_perpendiculars_m" as lpp, 
+            "Breadth_Moduled_m" as breadth, 
+            "Depth", 
+            deadweight, 
+            "ME_1_MCR_kW" as mcr, 
+            "IMO" as imo, 
+            "Vessel_Name" as vessel_name
+        FROM hull_particulars
+        WHERE vessel_type = %(vessel_type)s
+        LIMIT 1000
+        """
+        
+        # Use connection with timeout
+        with engine.connect() as conn:
+            conn.execute(sqlalchemy.text("SET statement_timeout = '120s'"))
+            df = pd.read_sql(query, conn, params={'vessel_type': vessel_type})
+        
+        # Convert string columns to numeric where needed
+        for col in ['lpp', 'breadth', 'depth', 'mcr']:
+            if col in df.columns and df[col].dtype == 'object':
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Filter out rows with null values in critical columns
+        df_clean = df.dropna(subset=['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'imo'])
+        st.write(f"After cleaning: {len(df_clean)} usable records")
+        
+        return df_clean
+        
+    except Exception as e:
+        st.error(f"Error fetching hull data: {str(e)}")
+        # Fallback: try without NULL checks
+        try:
+            st.write("Trying simplified query...")
+            simple_query = """
+            SELECT 
+                "Length_between_perpendiculars_m" as lpp, 
+                "Breadth_Moduled_m" as breadth, 
+                "Depth", 
+                deadweight, 
+                "ME_1_MCR_kW" as mcr, 
+                "IMO" as imo, 
+                "Vessel_Name" as vessel_name
+            FROM hull_particulars
+            WHERE vessel_type = %(vessel_type)s
+            LIMIT 100
+            """
+            
+            with engine.connect() as conn:
+                conn.execute(sqlalchemy.text("SET statement_timeout = '60s'"))
+                df = pd.read_sql(simple_query, conn, params={'vessel_type': vessel_type})
+            
+            # Convert and clean
+            for col in ['lpp', 'breadth', 'depth', 'mcr']:
+                if col in df.columns and df[col].dtype == 'object':
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            return df.dropna(subset=['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'imo'])
+            
+        except Exception as e2:
+            st.error(f"Even simplified query failed: {str(e2)}")
+            return pd.DataFrame()
 
 def get_performance_data(engine, imos):
-    imos = [int(imo) for imo in imos]
-    query = """
-    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
-    FROM vessel_performance_model_data
-    WHERE vessel_imo IN %(imos)s
-    """
-    df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
-    return df.dropna()
+    if len(imos) == 0:
+        return pd.DataFrame()
+        
+    imos = [str(imo) for imo in imos]  # Convert to string to match IMO format
+    
+    try:
+        # Limit the number of IMOs to prevent timeout
+        limited_imos = imos[:50]  # Process max 50 vessels at a time
+        
+        query = """
+        SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
+        FROM vessel_performance_model_data
+        WHERE vessel_imo::text IN %(imos)s
+        LIMIT 5000
+        """
+        
+        with engine.connect() as conn:
+            conn.execute(sqlalchemy.text("SET statement_timeout = '120s'"))
+            df = pd.read_sql(query, conn, params={'imos': tuple(limited_imos)})
+        
+        return df.dropna()
+        
+    except Exception as e:
+        st.error(f"Error fetching performance data: {str(e)}")
+        return pd.DataFrame()
 
 def separate_data(df):
     ballast_df = df[df['load_type'] == 'Ballast']
