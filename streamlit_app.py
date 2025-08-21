@@ -30,8 +30,8 @@ selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
 def get_hull_data(engine, vessel_type):
     query = """
-    SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
-           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
+    SELECT Length_between_perpendiculars_m as lpp, Breadth_moduled_m as breadth, 
+           Depth, deadweight, ME_1_MCR_kW as mcr, imo, vessel_name
     FROM hull_particulars
     WHERE vessel_type = %(vessel_type)s
     """
