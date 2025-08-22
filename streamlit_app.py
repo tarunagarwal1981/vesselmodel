@@ -84,6 +84,10 @@ def get_hull_data(engine, vessel_type):
                 if df[col].dtype == 'object':
                     df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Ensure IMO is string for consistent merging
+        if 'imo' in df.columns:
+            df['imo'] = df['imo'].astype(str).str.strip()
+        
         # Filter out rows with null values in critical columns
         initial_count = len(df)
         df_clean = df.dropna(subset=['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'imo'])
@@ -159,6 +163,10 @@ def get_performance_data(engine, imos):
             conn.execute(sqlalchemy.text("SET statement_timeout = '120s'"))
             result = conn.execute(query, {'imos': limited_imos})
             df = pd.DataFrame(result.fetchall(), columns=result.keys())
+        
+        # Ensure vessel_imo is string for consistent merging
+        if not df.empty and 'vessel_imo' in df.columns:
+            df['vessel_imo'] = df['vessel_imo'].astype(str).str.strip()
         
         return df.dropna() if not df.empty else pd.DataFrame()
         
@@ -250,11 +258,35 @@ if st.sidebar.button("Generate Predictions"):
             st.error("No performance data found for the selected vessels")
             st.stop()
         
+        # Fix data type mismatch before merging
+        st.write("Preparing data for merge...")
+        
+        # Convert IMO columns to string for consistent merging
+        hull_data['imo'] = hull_data['imo'].astype(str)
+        performance_data['vessel_imo'] = performance_data['vessel_imo'].astype(str)
+        
+        # Display data types for debugging
+        st.write(f"Hull data IMO type: {hull_data['imo'].dtype}")
+        st.write(f"Performance data vessel_imo type: {performance_data['vessel_imo'].dtype}")
+        st.write(f"Sample hull IMOs: {hull_data['imo'].head().tolist()}")
+        st.write(f"Sample performance IMOs: {performance_data['vessel_imo'].head().tolist()}")
+        
         # Merge hull data with performance data
         combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo').dropna()
         
         if combined_data.empty:
             st.error("No matching data found between hull particulars and performance data")
+            st.write("Debugging information:")
+            st.write(f"Unique hull IMOs: {len(hull_data['imo'].unique())}")
+            st.write(f"Unique performance IMOs: {len(performance_data['vessel_imo'].unique())}")
+            
+            # Show overlap
+            hull_imos = set(hull_data['imo'].unique())
+            perf_imos = set(performance_data['vessel_imo'].unique())
+            overlap = hull_imos.intersection(perf_imos)
+            st.write(f"IMOs in both datasets: {len(overlap)}")
+            if overlap:
+                st.write(f"Sample overlapping IMOs: {list(overlap)[:5]}")
             st.stop()
         
         # Separate data into ballast and laden conditions
