@@ -53,13 +53,13 @@ def get_hull_data(engine, vessel_type):
         # If count is reasonable, proceed with full query
         query = sqlalchemy.text("""
         SELECT 
-            "Length_between_perpendiculars_m" as lpp, 
-            "Breadth_Moduled_m" as breadth, 
-            "Depth" as depth, 
+            "length_between_perpendiculars_m" as lpp, 
+            "breadth_moduled_m" as breadth, 
+            "depth" as depth, 
             deadweight, 
-            "ME_1_MCR_kW" as mcr, 
-            "IMO" as imo, 
-            "Vessel_Name" as vessel_name
+            "me_1_mcr_kw" as mcr, 
+            "imo" as imo, 
+            "vessel_name" as vessel_name
         FROM hull_particulars
         WHERE vessel_type = :vessel_type
         LIMIT 1000
