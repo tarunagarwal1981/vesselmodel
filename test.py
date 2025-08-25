@@ -56,17 +56,19 @@ def train_model(X, y, model_type):
         X_poly = poly.fit_transform(X_train_scaled)
         model = LinearRegression()
         model.fit(X_poly, y_train)
+        # Return the polynomial transformer along with model and scaler
+        return model, scaler, poly
     elif model_type == "Random Forest":
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train_scaled, y_train)
-    
-    return model, scaler
+        # Return None for poly since Random Forest doesn't use it
+        return model, scaler, None
 
-def predict(model, scaler, X, model_type):
+def predict(model, scaler, poly, X, model_type):
     X_scaled = scaler.transform(X)
     if model_type == "Linear Regression with Polynomial Features":
-        poly = PolynomialFeatures(degree=2)
-        X_poly = poly.fit_transform(X_scaled)
+        # Use the SAME polynomial transformer that was fitted during training
+        X_poly = poly.transform(X_scaled)  # transform, not fit_transform!
         return model.predict(X_poly)
     else:
         return model.predict(X_scaled)
@@ -100,8 +102,9 @@ def run_all_tests():
                 df = ballast_df if condition == 'ballast' else laden_df
                 for target in ['power', 'consumption']:
                     y = df['me_power_kw'] if target == 'power' else df['me_consumption_mt']
-                    model, scaler = train_model(df[input_columns], y, model_type)
-                    models[f"{condition}_{target}"] = (model, scaler)
+                    model, scaler, poly = train_model(df[input_columns], y, model_type)
+                    # Store all three components: model, scaler, and poly transformer
+                    models[f"{condition}_{target}"] = (model, scaler, poly)
             
             # Test on 10 random vessels or all vessels if less than 10
             test_vessels = hull_data.sample(n=min(10, len(hull_data)))
@@ -126,8 +129,9 @@ def run_all_tests():
                         
                         if not actual.empty:
                             for target in ['power', 'consumption']:
-                                model, scaler = models[f"{condition}_{target}"]
-                                predicted = predict(model, scaler, input_data, model_type)[0]
+                                model, scaler, poly = models[f"{condition}_{target}"]
+                                # Pass the fitted polynomial transformer to predict function
+                                predicted = predict(model, scaler, poly, input_data, model_type)[0]
                                 actual_value = actual['me_power_kw'].values[0] if target == 'power' else actual['me_consumption_mt'].values[0]
                                 diff = calculate_percentage_difference(actual_value, predicted)
                                 
