@@ -29,7 +29,7 @@ def get_hull_data(engine, vessel_type):
             "breadth_moduled_m" as breadth, 
             "depth" as depth, 
             deadweight, 
-            
+            "me_1_mcr_kw" as mcr, 
             "imo" as imo, 
             "vessel_name" as vessel_name,
             vessel_type
@@ -48,7 +48,7 @@ def get_hull_data(engine, vessel_type):
             return df
         
         # Convert string columns to numeric where needed
-        numeric_columns = ['lpp', 'breadth', 'depth', 'mcr', 'deadweight']
+        numeric_columns = ['lpp', 'breadth', 'depth', 'deadweight']
         for col in numeric_columns:
             if col in df.columns and df[col].dtype == 'object':
                 df[col] = pd.to_numeric(df[col], errors='coerce')
