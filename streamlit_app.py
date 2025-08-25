@@ -12,14 +12,7 @@ import sqlalchemy
 from test import run_all_tests
 
 def get_db_connection():
-    engine = get_db_engine()
-    
-    # Configure engine with timeouts
-    if hasattr(engine, 'pool'):
-        engine.pool._timeout = 300  # 5 minutes
-        engine.pool._recycle = 3600  # 1 hour
-    
-    return engine
+    return get_db_engine()
 
 st.set_page_config(page_title="Vessel Performance Prediction", layout="wide")
 
@@ -36,164 +29,24 @@ model_options = ["Linear Regression with Polynomial Features", "Random Forest", 
 selected_model = st.sidebar.selectbox("Select a model to train:", model_options)
 
 def get_hull_data(engine, vessel_type):
-    # First, try a simpler query to check if data exists
-    try:
-        # Simple count query first
-        count_query = sqlalchemy.text("SELECT COUNT(*) FROM hull_particulars WHERE vessel_type = :vessel_type")
-        with engine.connect() as conn:
-            # Set timeout for this session
-            conn.execute(sqlalchemy.text("SET statement_timeout = '60s'"))
-            result = conn.execute(count_query, {'vessel_type': vessel_type})
-            count = result.scalar()
-            st.write(f"Found {count} total records for {vessel_type}")
-        
-        if count == 0:
-            return pd.DataFrame()
-        
-        # If count is reasonable, proceed with full query
-        query = sqlalchemy.text("""
-        SELECT 
-            "length_between_perpendiculars_m" as lpp, 
-            "breadth_moduled_m" as breadth, 
-            "depth" as depth, 
-            deadweight, 
-            "me_1_mcr_kw" as mcr, 
-            "imo" as imo, 
-            "vessel_name" as vessel_name
-        FROM hull_particulars
-        WHERE vessel_type = :vessel_type
-        LIMIT 1000
-        """)
-        
-        # Use connection with timeout
-        with engine.connect() as conn:
-            conn.execute(sqlalchemy.text("SET statement_timeout = '120s'"))
-            result = conn.execute(query, {'vessel_type': vessel_type})
-            df = pd.DataFrame(result.fetchall(), columns=result.keys())
-        
-        if df.empty:
-            st.write("No data returned from query")
-            return df
-        
-        st.write(f"Retrieved {len(df)} records")
-        
-        # Convert string columns to numeric where needed
-        numeric_columns = ['lpp', 'breadth', 'depth', 'mcr', 'deadweight']
-        for col in numeric_columns:
-            if col in df.columns:
-                if df[col].dtype == 'object':
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Ensure IMO is string for consistent merging
-        if 'imo' in df.columns:
-            df['imo'] = df['imo'].astype(str).str.strip()
-        
-        # Filter out rows with null values in critical columns
-        initial_count = len(df)
-        df_clean = df.dropna(subset=['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'imo'])
-        st.write(f"After cleaning: {len(df_clean)} usable records (removed {initial_count - len(df_clean)} with missing data)")
-        
-        return df_clean
-        
-    except Exception as e:
-        st.error(f"Error fetching hull data: {str(e)}")
-        # Fallback: try without WHERE clause to test basic connectivity
-        try:
-            st.write("Trying basic connectivity test...")
-            simple_query = sqlalchemy.text("""
-            SELECT 
-                "Length_between_perpendiculars_m" as lpp, 
-                "Breadth_Moduled_m" as breadth, 
-                "Depth" as depth, 
-                deadweight, 
-                "ME_1_MCR_kW" as mcr, 
-                "IMO" as imo, 
-                "Vessel_Name" as vessel_name,
-                vessel_type
-            FROM hull_particulars
-            LIMIT 10
-            """)
-            
-            with engine.connect() as conn:
-                conn.execute(sqlalchemy.text("SET statement_timeout = '60s'"))
-                result = conn.execute(simple_query)
-                df = pd.DataFrame(result.fetchall(), columns=result.keys())
-            
-            st.write("Sample data from table:")
-            st.dataframe(df)
-            
-            # Filter by vessel type in pandas
-            df_filtered = df[df['vessel_type'] == vessel_type] if 'vessel_type' in df.columns else pd.DataFrame()
-            
-            if not df_filtered.empty:
-                # Convert and clean
-                numeric_columns = ['lpp', 'breadth', 'depth', 'mcr', 'deadweight']
-                for col in numeric_columns:
-                    if col in df_filtered.columns and df_filtered[col].dtype == 'object':
-                        df_filtered[col] = pd.to_numeric(df_filtered[col], errors='coerce')
-                
-                return df_filtered.dropna(subset=['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'imo'])
-            else:
-                st.write(f"No records found for vessel type: {vessel_type}")
-                st.write(f"Available vessel types: {df['vessel_type'].unique().tolist() if 'vessel_type' in df.columns else 'Unknown'}")
-                return pd.DataFrame()
-            
-        except Exception as e2:
-            st.error(f"Even basic connectivity test failed: {str(e2)}")
-            return pd.DataFrame()
+    query = """
+    SELECT length_between_perpendiculars_m as lpp, breadth_moduled_m as breadth, 
+           depth, deadweight, me_1_mcr_kw as mcr, imo, vessel_name
+    FROM hull_particulars
+    WHERE vessel_type = %(vessel_type)s
+    """
+    df = pd.read_sql(query, engine, params={'vessel_type': vessel_type})
+    return df.dropna()
 
 def get_performance_data(engine, imos):
-    if len(imos) == 0:
-        return pd.DataFrame()
-        
-    imos = [str(imo) for imo in imos]  # Convert to string to match IMO format
-    
-    try:
-        # Limit the number of IMOs to prevent timeout
-        limited_imos = imos[:50]  # Process max 50 vessels at a time
-        
-        query = sqlalchemy.text("""
-        SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
-        FROM vessel_performance_model_data
-        WHERE vessel_imo::text = ANY(:imos)
-        LIMIT 5000
-        """)
-        
-        with engine.connect() as conn:
-            conn.execute(sqlalchemy.text("SET statement_timeout = '120s'"))
-            result = conn.execute(query, {'imos': limited_imos})
-            df = pd.DataFrame(result.fetchall(), columns=result.keys())
-        
-        # Ensure vessel_imo is string for consistent merging
-        if not df.empty and 'vessel_imo' in df.columns:
-            df['vessel_imo'] = df['vessel_imo'].astype(str).str.strip()
-        
-        return df.dropna() if not df.empty else pd.DataFrame()
-        
-    except Exception as e:
-        st.error(f"Error fetching performance data: {str(e)}")
-        # Try a simpler approach
-        try:
-            st.write("Trying simplified performance data query...")
-            simple_query = sqlalchemy.text("""
-            SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
-            FROM vessel_performance_model_data
-            LIMIT 1000
-            """)
-            
-            with engine.connect() as conn:
-                result = conn.execute(simple_query)
-                df = pd.DataFrame(result.fetchall(), columns=result.keys())
-            
-            if not df.empty:
-                # Filter in pandas
-                df_filtered = df[df['vessel_imo'].astype(str).isin(imos)]
-                return df_filtered.dropna()
-            
-        except Exception as e2:
-            st.error(f"Performance data fallback also failed: {str(e2)}")
-        
-        return pd.DataFrame()
+    imos = [int(imo) for imo in imos]
+    query = """
+    SELECT speed_kts, me_consumption_mt, me_power_kw, vessel_imo, load_type
+    FROM vessel_performance_model_data
+    WHERE vessel_imo IN %(imos)s
+    """
+    df = pd.read_sql(query, engine, params={'imos': tuple(imos)})
+    return df.dropna()
 
 def separate_data(df):
     ballast_df = df[df['load_type'] == 'Ballast']
@@ -239,66 +92,14 @@ def predict_performance(model, scaler, input_data, model_type):
 if st.sidebar.button("Generate Predictions"):
     try:
         engine = get_db_connection()
-        
-        # Get hull data
-        st.write("Fetching hull data...")
         hull_data = get_hull_data(engine, vessel_type)
-        
-        if hull_data.empty:
-            st.error(f"No hull data found for vessel type: {vessel_type}")
-            st.stop()
-        
-        st.write(f"Found {len(hull_data)} vessels of type {vessel_type}")
-        
-        # Get performance data
-        st.write("Fetching performance data...")
         performance_data = get_performance_data(engine, hull_data['imo'].unique())
-        
-        if performance_data.empty:
-            st.error("No performance data found for the selected vessels")
-            st.stop()
-        
-        # Fix data type mismatch before merging
-        st.write("Preparing data for merge...")
-        
-        # Convert IMO columns to string for consistent merging
-        hull_data['imo'] = hull_data['imo'].astype(str)
-        performance_data['vessel_imo'] = performance_data['vessel_imo'].astype(str)
-        
-        # Display data types for debugging
-        st.write(f"Hull data IMO type: {hull_data['imo'].dtype}")
-        st.write(f"Performance data vessel_imo type: {performance_data['vessel_imo'].dtype}")
-        st.write(f"Sample hull IMOs: {hull_data['imo'].head().tolist()}")
-        st.write(f"Sample performance IMOs: {performance_data['vessel_imo'].head().tolist()}")
         
         # Merge hull data with performance data
         combined_data = pd.merge(hull_data, performance_data, left_on='imo', right_on='vessel_imo').dropna()
         
-        if combined_data.empty:
-            st.error("No matching data found between hull particulars and performance data")
-            st.write("Debugging information:")
-            st.write(f"Unique hull IMOs: {len(hull_data['imo'].unique())}")
-            st.write(f"Unique performance IMOs: {len(performance_data['vessel_imo'].unique())}")
-            
-            # Show overlap
-            hull_imos = set(hull_data['imo'].unique())
-            perf_imos = set(performance_data['vessel_imo'].unique())
-            overlap = hull_imos.intersection(perf_imos)
-            st.write(f"IMOs in both datasets: {len(overlap)}")
-            if overlap:
-                st.write(f"Sample overlapping IMOs: {list(overlap)[:5]}")
-            st.stop()
-        
         # Separate data into ballast and laden conditions
         ballast_df, laden_df = separate_data(combined_data)
-        
-        if ballast_df.empty:
-            st.error("No ballast condition data found")
-            st.stop()
-            
-        if laden_df.empty:
-            st.error("No laden condition data found")
-            st.stop()
         
         # Display the separated datasets
         st.subheader("Separated Datasets")
@@ -314,8 +115,6 @@ if st.sidebar.button("Generate Predictions"):
         
         input_columns = ['lpp', 'breadth', 'depth', 'deadweight', 'mcr', 'speed_kts']
         
-        # Train models
-        st.write("Training models...")
         ballast_power_model, ballast_power_scaler = train_model(ballast_df[input_columns], ballast_df['me_power_kw'], selected_model)
         ballast_consumption_model, ballast_consumption_scaler = train_model(ballast_df[input_columns], ballast_df['me_consumption_mt'], selected_model)
         laden_power_model, laden_power_scaler = train_model(laden_df[input_columns], laden_df['me_power_kw'], selected_model)
@@ -356,13 +155,8 @@ if st.sidebar.button("Generate Predictions"):
         with col2:
             st.write("Laden Condition")
             st.dataframe(pd.DataFrame(laden_predictions).set_index('Speed (kts)'))
-            
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
-        st.write("Error details for debugging:")
-        st.write(f"Error type: {type(e).__name__}")
-        import traceback
-        st.code(traceback.format_exc())
 
 # Add the "Run Test" button below the "Generate Predictions" button in the sidebar
 if st.sidebar.button("Run Test"):
