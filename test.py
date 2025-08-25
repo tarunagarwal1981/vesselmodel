@@ -29,7 +29,7 @@ def get_hull_data(engine, vessel_type):
             "breadth_moduled_m" as breadth, 
             "depth" as depth, 
             deadweight, 
-            "me_1_mcr_kw" as mcr, 
+            # "me_1_mcr_kw" as mcr, 
             "imo" as imo, 
             "vessel_name" as vessel_name,
             vessel_type
